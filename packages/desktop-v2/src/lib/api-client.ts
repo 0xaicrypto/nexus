@@ -44,35 +44,43 @@ const envBase =
 const baseUrl = envBase && envBase.length > 0 ? envBase : 'http://127.0.0.1:8001';
 
 // ─────────────────────────────────────────────────────────────────────
-// Per-session user_id storage (M0)
+// Persistent user_id storage
 // ─────────────────────────────────────────────────────────────────────
-// We stash the user_id minted by /auth/register so silent re-auth on a
-// 401 (e.g. JWT expiry) can call /auth/login without re-prompting the
-// user. Storage tier is ``sessionStorage`` — same as the JWT (see
-// ``store.ts::readStoredToken`` for the rationale).
+// The user_id is the medic's stable identifier — NOT auth. Auth is
+// the JWT (in sessionStorage; wiped on window close per the
+// "auto-logout on close" UX).
 //
-// Closing the Nexus window wipes sessionStorage → next launch has
-// neither token nor user_id → LoginView is shown and the medic must
-// re-enter their name. This matches the user-stated UX:
-//   "登陆之后，关闭desktop，应该首先自动登出，下次重新打开需要重新登陆."
+// We keep user_id in localStorage so that:
 //
-// U2+: switch to @tauri-apps/plugin-stronghold so the user_id can
-// optionally be sealed in the OS keychain for users who explicitly
-// opt into "remember me".
+//   1. Closing the desktop and reopening it asks the medic to sign
+//      in again (no JWT → LoginView).
+//   2. On sign-in, the cached user_id flows into /auth/login, the
+//      server returns a fresh JWT bound to the SAME user_id, and the
+//      medic's previously uploaded patients / memory / sessions are
+//      all visible again.
+//
+// Before this fix user_id lived in sessionStorage alongside the JWT
+// — closing the window minted a fresh user_id on next sign-in, so
+// every restart looked like a brand-new install with no patients
+// and an empty Memory tab. The DB still had the old user's data, it
+// was just no longer reachable from the desktop.
+//
+// U2+: optionally seal the user_id in the OS keychain via
+// @tauri-apps/plugin-stronghold for users who turn on "remember me".
 
 const STORAGE_KEY_USER_ID = 'nexus.auth.user_id';
 
 function readUserId(): string | null {
   try {
-    return sessionStorage.getItem(STORAGE_KEY_USER_ID);
+    return localStorage.getItem(STORAGE_KEY_USER_ID);
   } catch {
-    return null;  // SSR / privacy modes where sessionStorage is unavailable
+    return null;  // SSR / privacy modes where localStorage is unavailable
   }
 }
 
 function writeUserId(id: string): void {
   try {
-    sessionStorage.setItem(STORAGE_KEY_USER_ID, id);
+    localStorage.setItem(STORAGE_KEY_USER_ID, id);
   } catch {
     /* no-op — sign-in still works for this session, just won't persist */
   }
@@ -80,7 +88,7 @@ function writeUserId(id: string): void {
 
 function clearUserId(): void {
   try {
-    sessionStorage.removeItem(STORAGE_KEY_USER_ID);
+    localStorage.removeItem(STORAGE_KEY_USER_ID);
   } catch {
     /* no-op */
   }
@@ -1131,6 +1139,72 @@ class _ApiClient {
     return r ?? null;
   }
 
+  /* ────────────────────────── email ────────────────────────── */
+
+  /** GET /api/v1/email/transport — what can the server send through
+   *  right now? Returned ``configured`` is the boolean the Compose
+   *  dialog's Send button gates on. Cheap (env-read only); we poll
+   *  every time the dialog opens so newly-dropped creds in
+   *  $RUNE_HOME/.env get picked up. */
+  async getEmailTransport(): Promise<EmailTransportStatus> {
+    interface Raw {
+      configured: boolean;
+      relay_configured: boolean;
+      smtp_configured: boolean;
+      bundled_creds: boolean;
+      default_from: string;
+      allowed_recipients: string[];
+      relay_url_host: string;
+    }
+    const r = await this.fetch<Raw>('/api/v1/email/transport');
+    return {
+      configured:        r.configured,
+      relayConfigured:   r.relay_configured,
+      smtpConfigured:    r.smtp_configured,
+      bundledCreds:      r.bundled_creds,
+      defaultFrom:       r.default_from,
+      allowedRecipients: r.allowed_recipients,
+      relayUrlHost:      r.relay_url_host,
+    };
+  }
+
+  /** POST /api/v1/email/send — dispatch one outbound email.
+   *
+   *  Returns 200 + ``ok=false`` on send-level failures (relay rejected,
+   *  SMTP auth bad, recipient blocked, etc.) so the UI can surface
+   *  ``message`` directly. Throws ApiError on HTTP-level failures
+   *  (401 expired, 422 schema, 503 nothing configured). */
+  async sendEmail(input: {
+    to: string[];
+    subject: string;
+    body: string;
+    cc?: string[];
+  }): Promise<EmailSendResult> {
+    interface Raw {
+      ok: boolean;
+      transport: string;
+      message: string;
+      sent_to: string[];
+      status_code: number;
+    }
+    const r = await this.fetch<Raw>('/api/v1/email/send', {
+      method: 'POST',
+      body: JSON.stringify({
+        to:      input.to,
+        cc:      input.cc ?? [],
+        subject: input.subject,
+        body:    input.body,
+      }),
+    });
+    return {
+      ok:         r.ok,
+      transport:  r.transport as EmailSendResult['transport'],
+      message:    r.message,
+      sentTo:     r.sent_to,
+      statusCode: r.status_code,
+    };
+  }
+
   /* ────────────────────────── chat (SSE) ────────────────────────── */
 
   /**
@@ -1319,6 +1393,35 @@ export interface SidecarDiagnostics {
   log_path: string;
   /** Ring buffer; newest line last. */
   lines: SidecarDiagLine[];
+}
+
+/** Shape returned by ``GET /api/v1/email/transport``. ``configured``
+ *  is the boolean the Compose dialog's Send button gates on. */
+export interface EmailTransportStatus {
+  configured:        boolean;
+  relayConfigured:   boolean;
+  smtpConfigured:    boolean;
+  bundledCreds:      boolean;
+  /** "" when nothing configured; for SMTP path = NEXUS_SMTP_FROM (or USER);
+   *  for relay path = "(relay · {host})" since the relay owns the envelope FROM. */
+  defaultFrom:       string;
+  /** Comma-list from NEXUS_SMTP_ALLOWED_RECIPIENTS — only enforced on SMTP path.
+   *  Empty list = no restriction. */
+  allowedRecipients: string[];
+  /** Hostname extracted from NEXUS_RELAY_URL for display, e.g. "relay.nexus.io".
+   *  Empty when no relay. */
+  relayUrlHost:      string;
+}
+
+/** Result returned by ``POST /api/v1/email/send``. ``ok`` is the
+ *  send-level outcome; UI surfaces ``message`` verbatim either way. */
+export interface EmailSendResult {
+  ok:         boolean;
+  transport:  'relay' | 'smtp' | 'none';
+  message:    string;
+  sentTo:     string[];
+  /** HTTP code from the relay if transport='relay'; 0 for SMTP. */
+  statusCode: number;
 }
 
 export const api = new _ApiClient();

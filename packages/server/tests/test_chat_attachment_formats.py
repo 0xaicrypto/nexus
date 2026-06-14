@@ -277,16 +277,18 @@ def test_tiff_transcoded_to_png_in_vision_call():
         / "nexus_server" / "retrieval_tiers.py"
     ).read_text()
 
-    # Look at the _t3_call_with_images function body.
+    # Look at the streaming vision helper body. Renamed from
+    # _t3_call_with_images → _t3_stream_with_images when we switched
+    # to generate_content_stream.
     m = re.search(
-        r"async def _t3_call_with_images\([\s\S]*?\nasync def |\Z",
+        r"async def _t3_stream_with_images\([\s\S]*?\n(?:async )?def |\Z",
         src,
     )
-    assert m, "_t3_call_with_images not found in retrieval_tiers.py"
+    assert m, "_t3_stream_with_images not found in retrieval_tiers.py"
     body = m.group(0)
 
     assert "image/tiff" in body, (
-        "_t3_call_with_images doesn't special-case image/tiff. "
+        "_t3_stream_with_images doesn't special-case image/tiff. "
         "TIFF pastes will reach Gemini and be silently rejected."
     )
     assert "PIL" in body or "Pillow" in body or "PILImage" in body, (
@@ -297,6 +299,80 @@ def test_tiff_transcoded_to_png_in_vision_call():
     assert '"image/png"' in body or "'image/png'" in body, (
         "TIFF transcode path doesn't set output mime to image/png — "
         "Gemini will still see image/tiff and reject."
+    )
+
+
+def test_vision_path_uses_streaming_api():
+    """``_t3_stream_with_images`` must call
+    ``client.models.generate_content_stream`` (not the buffered
+    ``generate_content``) so vision-turn text streams into the chat
+    pane in real time."""
+    src = (
+        pathlib.Path(__file__).resolve().parents[1]
+        / "nexus_server" / "retrieval_tiers.py"
+    ).read_text()
+
+    m = re.search(
+        r"async def _t3_stream_with_images\([\s\S]*?\n(?:async )?def |\Z",
+        src,
+    )
+    assert m, "_t3_stream_with_images not found"
+    body = m.group(0)
+
+    assert "generate_content_stream" in body, (
+        "_t3_stream_with_images doesn't use generate_content_stream — "
+        "vision turns will be one-shot buffered (5-10s blank screen)."
+    )
+    # The helper must be an async generator.
+    assert "AsyncIterator[str]" in body or "yield " in body, (
+        "_t3_stream_with_images doesn't yield — it's not a generator."
+    )
+
+
+def test_yield_t3_streams_vision_deltas():
+    """Behavioural: yield_t3_llm's vision path must emit MULTIPLE
+    final_answer_chunk events (one per stream delta), not a single
+    buffered chunk. Patches _t3_stream_with_images to a controlled
+    fake stream and counts the emitted chunks."""
+    import asyncio
+    import sqlite3
+    from nexus_server import retrieval_tiers
+
+    async def fake_stream(**_kw):
+        for d in ("Hello", " from", " Gemini ", "vision."):
+            yield d
+
+    orig = retrieval_tiers._t3_stream_with_images
+    retrieval_tiers._t3_stream_with_images = fake_stream
+
+    deltas: list[str] = []
+    async def run():
+        # In-memory DB — yield_t3_llm just needs SOMETHING to query
+        # against for patient context (none here, fine).
+        conn = sqlite3.connect(":memory:")
+        from nexus_server.event_sourcing import init_event_sourcing_schema
+        init_event_sourcing_schema(conn)
+        async for chunk in retrieval_tiers.yield_t3_llm(
+            conn, user_id="u", patient_hash=None,
+            question="what is this?",
+            attachment_images=[("x.png", "image/png", b"fake")],
+        ):
+            if chunk.kind == "final_answer_chunk":
+                deltas.append(chunk.data.get("text", ""))
+
+    try:
+        asyncio.run(run())
+    finally:
+        retrieval_tiers._t3_stream_with_images = orig
+
+    assert len(deltas) >= 4, (
+        f"vision path emitted {len(deltas)} chunks (expected ≥4 "
+        f"streaming deltas): {deltas!r}. Looks like the helper is "
+        f"still buffering the full answer."
+    )
+    full = "".join(deltas)
+    assert "Gemini" in full, (
+        f"streaming concatenation lost content: {full!r}"
     )
 
 

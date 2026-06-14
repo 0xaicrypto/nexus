@@ -491,21 +491,30 @@ async def yield_t3_llm(
     if context_block:
         system_prompt += "\n\nPATIENT CONTEXT (from the local clinical graph):\n" + context_block
 
+    answer_buf: list[str] = []   # accumulates full answer for citation extraction
     try:
         if attachment_images:
-            # Vision path — Gemini multimodal direct call. Each image
-            # passes as a Part.from_bytes alongside the prompt text.
-            # We pin the model to the same Flash 2.5 Quick scan uses
-            # (cheap + supports vision). Live API-key read so
-            # Settings · LLM changes take effect without restart.
-            answer = await _t3_call_with_images(
+            # Vision path — Gemini multimodal STREAMING call. Each
+            # image passes as a Part.from_bytes alongside the prompt
+            # text. We pin the model to Flash 2.5 (cheap + supports
+            # vision + supports the streaming API).
+            #
+            # Tokens stream out via ``final_answer_chunk`` events so
+            # the desktop's chat pane renders them as they arrive —
+            # matching the SSE feel of the text-only path. Previously
+            # we returned the whole answer in one shot which made
+            # vision turns feel laggy (~5-10s blank screen).
+            async for delta in _t3_stream_with_images(
                 question=question,
                 system_prompt=system_prompt,
                 images=attachment_images,
-            )
+            ):
+                if delta:
+                    answer_buf.append(delta)
+                    yield RetrievalChunk("final_answer_chunk", {"text": delta})
             logger.info(
-                "yield_t3_llm: vision path, images=%d answer_chars=%d",
-                len(attachment_images), len(answer),
+                "yield_t3_llm: vision stream done, images=%d answer_chars=%d",
+                len(attachment_images), sum(len(s) for s in answer_buf),
             )
         else:
             from nexus_server import llm_gateway
@@ -518,15 +527,19 @@ async def yield_t3_llm(
                 tools=None,
             )
             logger.info("yield_t3_llm: model=%s answer_chars=%d", model, len(content))
-            answer = content.strip() or "(no response)"
+            text = content.strip() or "(no response)"
+            answer_buf.append(text)
+            yield RetrievalChunk("final_answer_chunk", {"text": text})
     except Exception as exc:  # noqa: BLE001
         logger.exception("LLM call failed in yield_t3_llm")
-        answer = (
+        err_msg = (
             f"⚠ LLM call failed: {exc}. Check Settings · LLM — make sure "
             f"the active provider has an API key, and the key is valid."
         )
+        answer_buf.append(err_msg)
+        yield RetrievalChunk("final_answer_chunk", {"text": err_msg})
 
-    yield RetrievalChunk("final_answer_chunk", {"text": answer})
+    answer = "".join(answer_buf)
 
     # Refine the citations event to only include node IDs the LLM
     # actually mentioned in its answer. Falling back to the full
@@ -560,23 +573,25 @@ async def yield_t3_llm(
     yield RetrievalChunk("turn_complete", {})
 
 
-async def _t3_call_with_images(
+async def _t3_stream_with_images(
     *,
     question: str,
     system_prompt: str,
     images: list[tuple[str, str, bytes]],
-) -> str:
-    """Direct google.genai multimodal call — bypasses llm_gateway
-    (which is text-only). Mirrors the call pattern Quick scan uses in
-    ``quick_scan._gemini_triage_grid``.
+) -> AsyncIterator[str]:
+    """Direct google.genai multimodal STREAMING call — bypasses
+    llm_gateway (text-only). Yields partial text deltas as Gemini
+    produces them.
+
+    Mirrors ``quick_scan._gemini_triage_grid``'s call shape but uses
+    the ``generate_content_stream`` API instead of the buffered
+    ``generate_content`` so the desktop's chat pane gets the same
+    SSE-stream feel for vision turns as for plain text.
 
     The model is pinned to ``gemini-2.5-flash`` for cost (text+vision
-    Flash is ~10× cheaper than Pro). We could route to Pro for
-    "important" images later, but Flash already handles screenshots /
-    photos well.
-
-    Returns the answer text. Raises on API error so the caller's
-    try/except can format a useful user-facing message.
+    Flash is ~10× cheaper than Pro). Yields nothing on API error and
+    raises so the caller's try/except can format a useful user-facing
+    message.
     """
     # Live API-key read so Settings · LLM updates take effect on the
     # next chat turn without restarting the sidecar.
@@ -638,17 +653,43 @@ async def _t3_call_with_images(
         parts.append(gtypes.Part.from_bytes(data=norm_bytes, mime_type=norm_mime))
     parts.append(full_prompt)
 
+    # Stream via google-genai's iterator API. The synchronous call
+    # returns an iterator that yields ``GenerateContentResponse``
+    # chunks; we adapt to async by running the next-chunk fetch in a
+    # thread (the underlying httpx call is blocking).
     import asyncio as _asyncio
-    loop = _asyncio.get_event_loop()
-    resp = await loop.run_in_executor(
-        None,
-        lambda: client.models.generate_content(
+
+    def _make_stream():
+        return client.models.generate_content_stream(
             model="gemini-2.5-flash",
             contents=parts,
-        ),
-    )
-    text = (getattr(resp, "text", "") or "").strip()
-    return text or "(model returned no text)"
+        )
+
+    loop = _asyncio.get_event_loop()
+    stream = await loop.run_in_executor(None, _make_stream)
+
+    saw_any = False
+    while True:
+        # ``next(stream, sentinel)`` is the pattern that doesn't raise
+        # on exhaustion. Run it in a thread so the event loop stays
+        # responsive and Quick scan / other concurrent work isn't
+        # blocked.
+        SENTINEL = object()
+        chunk = await loop.run_in_executor(
+            None, lambda: next(stream, SENTINEL),
+        )
+        if chunk is SENTINEL:
+            break
+        delta = (getattr(chunk, "text", "") or "")
+        if delta:
+            saw_any = True
+            yield delta
+
+    if not saw_any:
+        # Defensive fallback — older google-genai builds occasionally
+        # ship a final response on .text but nothing on stream chunks.
+        # We don't want a silent empty bubble in chat.
+        yield "(model returned no text)"
 
 
 async def retrieve_async(

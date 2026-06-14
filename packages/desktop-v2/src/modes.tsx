@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Mail } from 'lucide-react';
 import { useAppState } from './store';
 import { Button, Card, Chip, Section, EmptyState, Input } from './components/ui';
 import {
@@ -136,9 +137,42 @@ export function TodayMode() {
 
 /* ─────────────── Patient overview (real projection) ─────────────── */
 
+/**
+ * Plain-text body for the "Email findings" pre-fill. We use only
+ * pseudonymous patient identifiers (initials / age group / sex) — no
+ * MRN, no DOB — so the email itself doesn't carry direct identifiers.
+ * The receiving clinician is expected to have access to the same
+ * patient registry. Findings are listed with their urgency tag so the
+ * recipient can triage at a glance.
+ */
+function buildFindingsEmailBody(
+  p: { sex?: string | null; ageGroup?: string | null },
+  proj: PatientProjection,
+): string {
+  const lines: string[] = [];
+  lines.push('Findings list (Quick scan output, unconfirmed):');
+  lines.push('');
+  for (const f of proj.findings) {
+    const c = f.content as Record<string, unknown>;
+    const label   = String(c.label ?? '(unlabeled)');
+    const urgency = String(c.urgency ?? '');
+    const tag = urgency ? ` [${urgency}]` : '';
+    lines.push(`  • ${label}${tag}`);
+  }
+  lines.push('');
+  lines.push(`Patient: ${p.sex ?? '?'} · ${p.ageGroup ?? '?'}`);
+  lines.push('');
+  lines.push(
+    'These are unconfirmed Quick scan candidates — please review '
+    + 'the source DICOMs before acting. I can share the imaging on request.',
+  );
+  return lines.join('\n');
+}
+
 export function PatientMode() {
   const p = useAppState((s) => s.activePatient);
   const setActiveMode = useAppState((s) => s.setActiveMode);
+  const openEmail = useAppState((s) => s.openEmailComposer);
   const [proj, setProj] = useState<PatientProjection | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,20 +226,37 @@ export function PatientMode() {
                 No active findings yet.
               </p>
             ) : (
-              <ul className="space-y-1 text-body text-text-primary">
-                {proj.findings.map((f) => (
-                  <li key={f.nodeId} className="flex items-center gap-2">
-                    <span>•</span>
-                    <span>{(f.content as any).label ?? '(unlabeled)'}</span>
-                    {(f.content as any).size_cm != null && (
-                      <Chip variant="neutral">
-                        {(f.content as any).size_cm} cm
-                      </Chip>
-                    )}
-                    <CitationChip2 index={f.nodeId} nodeId={f.nodeId} />
-                  </li>
-                ))}
-              </ul>
+              <>
+                <ul className="space-y-1 text-body text-text-primary">
+                  {proj.findings.map((f) => (
+                    <li key={f.nodeId} className="flex items-center gap-2">
+                      <span>•</span>
+                      <span>{(f.content as any).label ?? '(unlabeled)'}</span>
+                      {(f.content as any).size_cm != null && (
+                        <Chip variant="neutral">
+                          {(f.content as any).size_cm} cm
+                        </Chip>
+                      )}
+                      <CitationChip2 index={f.nodeId} nodeId={f.nodeId} />
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    variant="subtle"
+                    onClick={() => openEmail({
+                      subject: `Findings · ${patientDisplayLabel(p)}`,
+                      body: buildFindingsEmailBody(p, proj),
+                    })}
+                  >
+                    <Mail size={14} /> Email findings to a colleague
+                  </Button>
+                  <span className="text-caption text-text-tertiary">
+                    Opens Compose with the findings list prefilled. PHI: the
+                    pseudonymous label is used; no MRN, no DOB.
+                  </span>
+                </div>
+              </>
             )}
           </Section>
 

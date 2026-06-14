@@ -96,33 +96,37 @@ def test_store_token_uses_sessionStorage_not_localStorage():
 
 
 def test_store_token_literal_key_not_in_localStorage():
-    """Belt-and-suspenders: even if someone bypasses the TOKEN_KEY
-    constant, the literal ``'nexus.auth.token'`` must NEVER be
-    written through localStorage.
-
-    This catches the 401-recovery path in api-client.ts which used a
-    string literal instead of importing TOKEN_KEY.
-    """
+    """Belt-and-suspenders: the literal ``'nexus.auth.token'`` must
+    NEVER be written through localStorage — JWT is auth state.
+    The user_id is a different concern (see
+    test_api_client_user_id_uses_localStorage below): it's the
+    medic's identifier, not auth, and IS persisted across launches
+    so the medic's data is reachable after re-login."""
     for fname in ("store.ts", "lib/api-client.ts"):
         src = _read(fname)
         bad = re.findall(
-            r"localStorage\.\w+\(\s*['\"]nexus\.auth\.(?:token|user_id)['\"]",
+            r"localStorage\.\w+\(\s*['\"]nexus\.auth\.token['\"]",
             src,
         )
         assert not bad, (
-            f"{fname} writes a nexus.auth.* key through localStorage. "
+            f"{fname} writes the JWT through localStorage. "
             "Auth state must live in sessionStorage so closing the "
             "window logs the user out. Offending refs: " + repr(bad)
         )
 
 
-def test_api_client_user_id_uses_sessionStorage():
-    """The cached user_id (``readUserId`` / ``writeUserId`` /
-    ``clearUserId`` in api-client.ts) must also live in
-    sessionStorage. Without this, the silent-re-auth path would
-    survive across restarts: a /auth/login with the cached user_id
-    after a 401 would skip the LoginView entirely on the very first
-    fetch after launch — masking the auto-logout behaviour."""
+def test_api_client_user_id_uses_localStorage():
+    """The cached user_id MUST live in localStorage so the medic's
+    patients / memory / sessions are still reachable after a
+    close-and-reopen cycle.
+
+    History (2026-06-14): user_id used to live in sessionStorage
+    alongside the JWT. Closing the window minted a fresh user_id on
+    next sign-in, and the medic saw an empty Patient list + empty
+    Memory tab even though the DB still had their data — it was
+    just bound to the old user_id they no longer had a handle to.
+    The fix: user_id is identity (persistent), JWT is auth
+    (session-scoped)."""
     src = _read("lib/api-client.ts")
 
     # The three helpers all wrap STORAGE_KEY_USER_ID — locate them by
@@ -135,13 +139,14 @@ def test_api_client_user_id_uses_sessionStorage():
         )
         assert body_match, f"{fn} not found in api-client.ts"
         body = body_match.group("body")
-        assert "localStorage" not in body, (
-            f"{fn} still references localStorage. The cached user_id "
-            "is part of auth state — it must use sessionStorage so "
-            "closing the window forces a re-login on next launch."
+        assert "localStorage" in body, (
+            f"{fn} doesn't use localStorage. The cached user_id is "
+            "identity, not auth — putting it in sessionStorage wipes "
+            "it on window close and the medic loses their data "
+            "binding."
         )
-        # And confirm sessionStorage IS the actual storage tier.
-        assert "sessionStorage" in body, (
-            f"{fn} doesn't reference sessionStorage either — what's "
-            "the user_id being persisted in now?"
+        assert "sessionStorage" not in body, (
+            f"{fn} still references sessionStorage. user_id must "
+            "persist across launches (sessionStorage wipes on close); "
+            "auth tier handled separately via the JWT."
         )

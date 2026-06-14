@@ -3,7 +3,7 @@ import { AlertTriangle } from 'lucide-react';
 import { useAppState } from './store';
 import { useGlobalShortcuts } from './lib/keyboard';
 import { GlobalHeader, PatientsSidebar, ModeTabs } from './components/layout';
-import { CommandPalette, NewPatientDialog, ToastStrip } from './components/overlays';
+import { CommandPalette, NewPatientDialog, ToastStrip, EmailComposerDialog } from './components/overlays';
 import { ContextRailContent } from './components/memory-ui';
 import {
   PractitionerHasLearnedView,
@@ -118,6 +118,7 @@ function MainShell() {
       <NewPatientDialog />
       <PractitionerHasLearnedView />
       <SettingsDataView />
+      <EmailComposerDialog />
       <ToastStrip />
     </div>
   );

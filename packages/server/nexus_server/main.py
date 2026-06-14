@@ -590,6 +590,12 @@ def create_app() -> FastAPI:
     # it back on every launch.
     from nexus_server import settings_router as _settings_router
     app.include_router(_settings_router.router)
+    # v2 email-send capability (relay-first, SMTP-fallback). Ported
+    # from v1's tools_calendar.py SendEmailNowTool. The desktop's
+    # Compose dialog hits POST /api/v1/email/send; GET .../transport
+    # tells it whether the operator has configured a backend.
+    from nexus_server import email_router as _email_router
+    app.include_router(_email_router.router)
 
     # #143 — serve the Cornerstone3D viewer.html as a static page.
     # Desktop launches the user's default browser at

@@ -2112,24 +2112,31 @@ def _run_quick_scan_after_ingest(*, user_id: str, study_id: str) -> str:
                         continue
                     urgency = str(f.get("urgency") or "").lower()
                     confidence = 0.6 if urgency == "critical" else 0.5
+                    # Bug history (2026-06-14): this payload used the
+                    # key "content" instead of "content_json". The
+                    # EventSpec for NODE_ADDED ``required_fields`` is
+                    # ("node_type", "content_json") — validate_payload
+                    # raised KeyError before the row could land in
+                    # clinical_graph_nodes. Quick scan reported "10
+                    # flagged" (count from the report metadata) but
+                    # the Memory tab + Patient · Active findings + chat
+                    # PATIENT CONTEXT were all empty. Confusingly the
+                    # exception got caught by the outer try, surfaced
+                    # in the upload summary as "…  graph emit failed:
+                    # …", but the medic saw the *count* on the row
+                    # while the actual nodes were silently gone.
                     store.emit_and_apply(
                         kind=EventKind.NODE_ADDED,
                         payload={
                             "node_type": "finding",
-                            "content": {
+                            "content_json": {
                                 "label": text[:200],
                                 "source": "quick_scan",
                                 "study_id": study_id,
                                 "urgency": urgency,
                                 "status": "unconfirmed",
                             },
-                            "evidence_quote": text[:480],
-                            "confidence": confidence,
                             "encounter_id": f"quick_scan:{study_id[:8]}",
-                            "extraction_model": "gemini-2.5-flash",
-                            "extraction_prompt_id": "quick_scan_v1",
-                            "source_kind": "study",
-                            "source_ref": study_id,
                         },
                         apply_fn=_h_node_added,
                         user_id=user_id,

@@ -78,6 +78,15 @@ interface AppState {
   openSettingsOverlay: () => void;
   closeSettingsOverlay: () => void;
 
+  // v2 email-send capability. ``emailComposerPrefill`` lets the
+  // caller seed the dialog (e.g. Patient mode's "Email findings"
+  // button drops the active findings into the Body field). Null
+  // when opened from a neutral entry point (CommandPalette).
+  emailComposerOpen: boolean;
+  emailComposerPrefill: { to?: string; subject?: string; body?: string } | null;
+  openEmailComposer: (prefill?: { to?: string; subject?: string; body?: string }) => void;
+  closeEmailComposer: () => void;
+
   // Mutations
   setActivePatient: (p: PatientCard | null) => void;
   setActiveMode: (m: ModeKind) => void;
@@ -253,6 +262,17 @@ export const useAppState = create<AppState>((set, get) => ({
   settingsOverlayOpen: false,
   openSettingsOverlay: () => set({ settingsOverlayOpen: true }),
   closeSettingsOverlay: () => set({ settingsOverlayOpen: false }),
+
+  emailComposerOpen: false,
+  emailComposerPrefill: null,
+  openEmailComposer: (prefill) => set({
+    emailComposerOpen: true,
+    emailComposerPrefill: prefill ?? null,
+  }),
+  closeEmailComposer: () => set({
+    emailComposerOpen: false,
+    emailComposerPrefill: null,
+  }),
 
   refreshPatients: async () => {
     try {
