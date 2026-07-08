@@ -6,11 +6,12 @@
  *       Imaging/Labs remain stubs (U2/U3+).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Mail } from 'lucide-react';
 import { useAppState } from './store';
 import { Button, Card, Chip, Section, EmptyState, Input } from './components/ui';
-import { ChatMarkdown } from './components/chat-markdown';
+import { ChatMarkdown, type FileChipRef } from './components/chat-markdown';
+import { ChatFileChipStrip, useChatFiles } from './components/chat-file-lib';
 // F-thinking-uniform — every bubble now uses the wrapper pair
 // (StreamingFooter for the persistent footer, StreamingCursor for
 // the inline blink). The bare ThinkingIndicator is no longer
@@ -31,7 +32,8 @@ import {
 import { patientDisplayLabel, cn } from './lib/util';
 import { useT, useModeLabel } from './lib/i18n';
 import type {
-  CitationRef,
+  ChatMsg,
+  ChatProposal,
   GraphNodeOut,
   PatientProjection,
   PractitionerCandidate,
@@ -678,63 +680,19 @@ function StudyPreviewCard({ study }: { study: StudyInfo }) {
 
 /* ─────────────── Encounter (real SSE) ─────────────── */
 
-interface ChatMsg {
-  role: 'user' | 'agent';
-  text: string;
-  ts: string;
-  tier?: TierKind;
-  reasoning?: string[];
-  citations?: CitationRef[];
-  elapsedMs?: number;
-  streaming?: boolean;
-  /** Human filenames for the files the medic attached on the user
-   *  turn (when role==='user'). We don't keep the file_ids here —
-   *  they're audit-visible in twin_event_log; this is purely for
-   *  the chat-pane chip render. */
-  attachedFileNames?: string[];
-  /** Heuristic detected a future-action intent — render an inline
-   *  confirmation card under the agent reply. Clearing this (Confirm,
-   *  Cancel, or after persist) takes it off the message. */
-  proposal?: ChatProposal | null;
-  /** T4 web-search results — Tavily returned this set of sources;
-   *  the LLM grounded its answer in them. UI renders an inline card
-   *  listing title + domain + link under the agent reply. */
-  webResults?: Array<{
-    w_id: number;
-    url: string;
-    title: string;
-    snippet: string;
-    domain: string;
-  }>;
-  /** chat_ingester outcome surfaced from the server. Lets the medic
-   *  see at a glance whether this turn's clinical entities landed in
-   *  Layer-1 memory — without this they have no idea why the 病人
-   *  tab's "当前发现" stayed empty. */
-  memoryIngested?: {
-    ok: boolean;
-    nodeCount: number;
-    rawCount: number;
-    error?: string;
-  };
-}
-
-/** Local copy of ScheduleProposalView with stage flags for UI state. */
-interface ChatProposal {
-  proposalId:     string;
-  kind:           'send_email';
-  fireAt:         number;
-  userTz:         string;
-  summary:        string;
-  payload:        Record<string, unknown>;
-  recurrenceCron: string | null;
-  sessionId:      string | null;
-  patientHash:    string | null;
-  needsUserInput: string[];
-  /** UI state — 'editing' / 'submitting' / 'done' / 'cancelled' */
-  uiState:        'editing' | 'submitting' | 'done' | 'cancelled';
-  /** Inline error message if /confirm rejected. */
-  errorMsg?:      string;
-}
+// F-chat-state-persist — ChatMsg + ChatProposal moved to lib/types.ts
+// so the zustand store (which also references them) doesn't import
+// modes.tsx. See `chatMsgsBySession` in store.ts.
+//
+// Module-level map of in-flight AbortControllers keyed by sessionId.
+// AbortController doesn't render anything, so it doesn't belong in
+// React state. Keeping it here (instead of useRef) lets it survive
+// EncounterMode unmounting — needed for the "Stop generating" UI we
+// haven't built yet but want to leave room for. The SSE loop itself
+// does NOT auto-abort on unmount; that's the whole point of
+// F-chat-state-persist (medic can switch tabs and the AI keeps
+// thinking).
+const _chatAbortBySession = new Map<string, AbortController>();
 
 /**
  * Inline confirmation card for a chat-detected scheduled-task
@@ -859,18 +817,37 @@ export function EncounterMode() {
   const setActiveSessionId = useAppState((s) => s.setActiveSessionId);
   const showToast      = useAppState((s) => s.showToast);
   const [draft, setDraft] = useState('');
-  const [msgs, setMsgs] = useState<ChatMsg[]>([]);
-  const [sending, setSending] = useState(false);
   const [backendStatus, setBackendStatus] =
     useState<'ok' | 'unreachable' | 'unhealthy' | 'checking'>('checking');
 
-  // F-tab-switch-race — AbortController for the in-flight SSE.
-  // Component unmount (tab switch) aborts → reader cancels → WebKit
-  // connection slot is freed before the next mount runs api.health().
-  // Without this, the next health probe couldn't get a connection
-  // (6-concurrent limit) and false-positively reported "Backend
-  // unreachable" even though the sidecar was healthy.
-  const chatAbortRef = useRef<AbortController | null>(null);
+  // F-chat-state-persist — msgs / streaming flag now live in zustand
+  // keyed by sessionId. Reading them via selectors means the chat
+  // pane rehydrates from the store on remount, so a streaming turn
+  // that was started before the medic switched tabs keeps painting
+  // as new chunks arrive (the SSE consumer below writes into the
+  // same store keys). The previous useState-based approach lost the
+  // partial answer on every unmount.
+  const setChatMsgs       = useAppState((s) => s.setChatMsgs);
+  const appendChatMsg     = useAppState((s) => s.appendChatMsg);
+  const updateLastChatMsg = useAppState((s) => s.updateLastChatMsg);
+  const setChatStreaming  = useAppState((s) => s.setChatStreaming);
+
+  // F-unified-chat-files — patient-scoped file library hook.
+  // p?.patientHash is the lib_scope_ref; falsy when no patient is
+  // active (the EmptyState path), in which case the hook short-
+  // circuits to an empty list and the chip strip won't render.
+  const encounterChatFiles = useChatFiles(
+    'patient', p?.patientHash ?? '',
+  );
+  // f_id_token → file metadata map for ChatMarkdown to inflate
+  // [F1] inline references inside agent replies.
+  const fileMap: Record<string, FileChipRef> = {};
+  for (const f of encounterChatFiles.files) {
+    fileMap[f.fIdToken] = {
+      fileId: f.fileId, name: f.name,
+      textExtractionStatus: f.textExtractionStatus,
+    };
+  }
 
   // Chat sessions ─────────────────────────────────────────────────
   const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
@@ -891,23 +868,16 @@ export function EncounterMode() {
     return () => { cancelled = true; };
   }, []);
 
-  // F-tab-switch-race — the medic explicitly wants the AI to keep
-  // thinking even when they switch tabs (ChatGPT-style: send,
-  // navigate away, come back later, see the answer). So we do NOT
-  // abort the SSE on unmount. The chat_router persists the assistant
-  // response to twin_event_log as soon as the turn completes; on
-  // remount, the listSessionMessages history-load hydrates it back.
+  // F-tab-switch-race + F-chat-state-persist — the medic explicitly
+  // wants the AI to keep thinking even when they switch tabs (ChatGPT
+  // style: send, navigate away, come back later, see the answer). So
+  // we do NOT abort the SSE on unmount.
   //
-  // The AbortController is still plumbed through sendChat (above)
-  // for explicit user-cancel UX in the future ("Stop generating"
-  // button), but the auto-abort-on-unmount behaviour is gone.
-  //
-  // Downside: ChatMsg state lives in this component, so an in-flight
-  // streaming response isn't visible mid-stream on remount until the
-  // next chunk OR the post-turn history-pull arrives. The proper
-  // fix is to lift the per-session chat array into zustand keyed by
-  // (patient_hash, session_id) — punted to a follow-up because it
-  // touches every chat surface; this comment is the anchor for it.
+  // With F-chat-state-persist the ChatMsg array now lives in zustand,
+  // so a streaming turn that started before unmount keeps writing
+  // into the store as chunks arrive; on remount the chat pane shows
+  // the partial answer immediately (no longer needs the post-turn
+  // history-pull as a fallback).
 
   // Load the user's sessions on mount + after each send-back-to-default
   // (so a freshly-created session is visible in the picker).
@@ -941,28 +911,60 @@ export function EncounterMode() {
   const effectiveSessionId = activeSessionId
     || (p ? `patient-${p.patientHash}` : '');
 
+  // F-chat-state-persist — read msgs + streaming for THIS session.
+  // Both come from the zustand store keyed by sessionId, so when the
+  // medic returns to a tab whose stream is still in flight, the
+  // selector immediately yields the in-progress array and the
+  // streaming flag (gates the Send button + "AI is thinking" hint).
+  const msgs = useAppState((s) =>
+    s.chatMsgsBySession[effectiveSessionId] ?? []);
+  const sending = useAppState((s) =>
+    !!s.chatStreamingBySession[effectiveSessionId]);
+
   // Load chat history whenever the effective session changes — that
   // covers both "medic picked a new session" and "medic switched
   // patients (so the derived default changed)".
+  //
+  // F-chat-state-persist — skip the load if a stream is in flight
+  // for this session. The SSE consumer owns msgs while ``sending``
+  // is true, and the previous unconditional ``setMsgs([])`` was the
+  // bug that erased the partial answer on every tab re-mount.
   useEffect(() => {
     let cancelled = false;
-    setMsgs([]);
     if (!effectiveSessionId) return;
+    if (useAppState.getState().chatStreamingBySession[effectiveSessionId]) {
+      // Stream in flight — leave the store alone; the consumer is
+      // still writing chunks into it.
+      return;
+    }
+    setChatMsgs(effectiveSessionId, []);
     api.listSessionMessages(effectiveSessionId, 200).then(
       (rows) => {
         if (cancelled) return;
-        setMsgs(rows.map((r): ChatMsg => ({
+        // Re-check the streaming flag — a fresh send() may have
+        // landed between the request and the response.
+        if (useAppState.getState().chatStreamingBySession[effectiveSessionId]) {
+          return;
+        }
+        setChatMsgs(effectiveSessionId, rows.map((r): ChatMsg => ({
           role:   r.role === 'agent' ? 'agent' : 'user',
           text:   r.text,
           ts:     formatRelativeTs(r.ts),
           reasoning: [],
           citations: [],
+          // F-history-attachments — hydrate attachment names from
+          // the server's ChatMessageView. Without this, a turn that
+          // had a file attached would lose its 📎 chip on
+          // history reload, making it look like the medic never
+          // sent the file. The chip is the medic's only visual
+          // breadcrumb of "the AI did see this file".
+          attachedFileNames: (r.attachments ?? []).map((a) => a.name),
         })));
       },
       () => { /* history is nice-to-have — empty pane is fine */ },
     );
     return () => { cancelled = true; };
-  }, [effectiveSessionId]);
+  }, [effectiveSessionId, setChatMsgs]);
 
   if (!p) return <EmptyState title={t('encounter.noSelection')} />;
 
@@ -979,9 +981,17 @@ export function EncounterMode() {
 
   async function uploadOne(file: File): Promise<string | null> {
     try {
+      // F-unified-chat-files — bind upload into the patient's
+      // file library so it shows in the chip strip + survives
+      // turns. libScopeKind+Ref are written server-side into the
+      // ``uploads`` row.
       const r = await api.uploadFile(file, file.name, {
-        patientHash: p?.patientHash,
+        patientHash:   p?.patientHash,
+        libScopeKind:  p ? 'patient' : undefined,
+        libScopeRef:   p?.patientHash,
       });
+      // Refresh chip strip so the new file shows up immediately.
+      try { encounterChatFiles.refresh(); } catch { /* hook not ready yet */ }
       return r.fileId;
     } catch (e) {
       showToast(`Upload failed: ${String(e)}`, 'error');
@@ -1077,30 +1087,33 @@ export function EncounterMode() {
     const userText = draft;
     setDraft('');
     setAttachments([]);
-    setMsgs((m) => [...m, {
+    const sid = effectiveSessionId;
+    appendChatMsg(sid, {
       role: 'user', text: userText, ts: 'now',
       attachedFileNames: stagedAttachments.map((a) => a.name),
-    } as ChatMsg]);
-    setSending(true);
+    });
+    setChatStreaming(sid, true);
 
     const startTs = Date.now();
-    const agentMsg: ChatMsg = {
+    appendChatMsg(sid, {
       role: 'agent', text: '', ts: 'now',
       reasoning: [], citations: [], streaming: true,
-    };
-    setMsgs((m) => [...m, agentMsg]);
+    });
 
+    // F-chat-state-persist — ``update`` writes through the zustand
+    // store, so chunks landing after the component unmounted (medic
+    // switched tabs) still hit the right state and are visible when
+    // the chat pane remounts. The elapsedMs stamp is local-only;
+    // it'll be the time since THIS send() started, even if the
+    // medic re-mounted in between.
     const update = (mut: Partial<ChatMsg>) =>
-      setMsgs((m) => {
-        const last = m[m.length - 1];
-        return [...m.slice(0, -1), { ...last, ...mut, elapsedMs: Date.now() - startTs }];
-      });
+      updateLastChatMsg(sid, { ...mut, elapsedMs: Date.now() - startTs });
 
     // F-tab-switch-race — bind this turn's SSE to a fresh
-    // AbortController. The unmount-cleanup useEffect will call
-    // ``ctrl.abort()`` if the medic switches tabs mid-stream.
+    // AbortController. Stored at module level so a future
+    // "Stop generating" UI can find it; unmount no longer aborts.
     const ctrl = new AbortController();
-    chatAbortRef.current = ctrl;
+    _chatAbortBySession.set(sid, ctrl);
 
     try {
       for await (const chunk of api.sendChat(
@@ -1113,40 +1126,25 @@ export function EncounterMode() {
             update({ tier: chunk.tier });
             break;
           case 'reasoning_chunk':
-            setMsgs((m) => {
-              const last = m[m.length - 1];
-              return [
-                ...m.slice(0, -1),
-                { ...last, reasoning: [...(last.reasoning ?? []), chunk.text] },
-              ];
-            });
+            updateLastChatMsg(sid, (last) => ({
+              reasoning: [...(last.reasoning ?? []), chunk.text],
+            }));
             break;
           case 'final_answer_chunk':
-            setMsgs((m) => {
-              const last = m[m.length - 1];
-              return [
-                ...m.slice(0, -1),
-                { ...last, text: last.text + chunk.text },
-              ];
-            });
+            updateLastChatMsg(sid, (last) => ({
+              text: last.text + chunk.text,
+            }));
             break;
           case 'citations':
             update({ citations: chunk.refs });
             break;
           case 'web_search_started':
-            setMsgs((m) => {
-              const last = m[m.length - 1];
-              return [
-                ...m.slice(0, -1),
-                {
-                  ...last,
-                  reasoning: [
-                    ...(last.reasoning ?? []),
-                    `🔎 Searching ${chunk.provider}…`,
-                  ],
-                },
-              ];
-            });
+            updateLastChatMsg(sid, (last) => ({
+              reasoning: [
+                ...(last.reasoning ?? []),
+                `🔎 Searching ${chunk.provider}…`,
+              ],
+            }));
             break;
           case 'web_search_results':
             // Attach the result list to the message; UI renders the
@@ -1230,11 +1228,11 @@ export function EncounterMode() {
       }
       update({ text: `[connection error: ${message}]`, streaming: false });
     } finally {
-      setSending(false);
-      // Clear the in-flight ref so the next send / next unmount
-      // doesn't try to abort an already-completed stream.
-      if (chatAbortRef.current === ctrl) {
-        chatAbortRef.current = null;
+      setChatStreaming(sid, false);
+      // Clear the in-flight controller so the next send / next
+      // unmount doesn't try to abort an already-completed stream.
+      if (_chatAbortBySession.get(sid) === ctrl) {
+        _chatAbortBySession.delete(sid);
       }
     }
   }
@@ -1370,7 +1368,7 @@ export function EncounterMode() {
                 the first chunk arrives (reasoning / citations are
                 often still streaming for 5-15s after first text). */}
             <div className="text-body leading-relaxed text-text-primary">
-              {m.text && <ChatMarkdown text={m.text} />}
+              {m.text && <ChatMarkdown text={m.text} fileMap={fileMap} />}
               {m.streaming && m.text && <StreamingCursor tone="base" />}
               {m.citations?.map((c, ci) => {
                 // Two kinds: graph_node (patient memory) and
@@ -1479,11 +1477,11 @@ export function EncounterMode() {
               </div>
             )}
             {/* Scheduled-task confirmation card. Renders under the
-                agent message that carries the proposal. The card calls
-                back into setMsgs to update its own state — confirmation
-                stamps the proposal as 'done' and ALSO leaves it
-                attached so the medic sees the green "scheduled" line
-                until they cancel the session. */}
+                agent message that carries the proposal. The card writes
+                its UI state into the zustand store (per F-chat-state-
+                persist) — confirmation stamps the proposal as 'done'
+                and ALSO leaves it attached so the medic sees the green
+                "scheduled" line until they cancel the session. */}
             {m.role === 'agent' && m.proposal && (
               <ScheduleProposalCard
                 proposal={m.proposal}
@@ -1492,12 +1490,21 @@ export function EncounterMode() {
                   // into the payload and POST /schedule/confirm.
                   const toList = edited.to
                     .split(',').map((s) => s.trim()).filter(Boolean);
+                  // F-chat-state-persist — read live msgs via
+                  // ``getState()`` so a chunk that landed between
+                  // render and click is still seen.
+                  const mutate = (
+                    fn: (mm: ChatMsg) => ChatMsg,
+                  ) => {
+                    const cur = useAppState.getState()
+                      .chatMsgsBySession[effectiveSessionId] ?? [];
+                    setChatMsgs(effectiveSessionId,
+                      cur.map((mm, mi) => mi === i ? fn(mm) : mm));
+                  };
                   // Move to 'submitting' for the spinner.
-                  setMsgs((arr) => arr.map((mm, mi) =>
-                    mi === i && mm.proposal
-                      ? { ...mm, proposal: { ...mm.proposal, uiState: 'submitting', errorMsg: undefined } }
-                      : mm
-                  ));
+                  mutate((mm) => mm.proposal
+                    ? { ...mm, proposal: { ...mm.proposal, uiState: 'submitting', errorMsg: undefined } }
+                    : mm);
                   try {
                     const userTz = (() => {
                       try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; }
@@ -1516,30 +1523,28 @@ export function EncounterMode() {
                       patientHash: m.proposal!.patientHash,
                       proposalId: m.proposal!.proposalId,
                     });
-                    setMsgs((arr) => arr.map((mm, mi) =>
-                      mi === i && mm.proposal
-                        ? { ...mm, proposal: { ...mm.proposal, uiState: 'done' } }
-                        : mm
-                    ));
+                    mutate((mm) => mm.proposal
+                      ? { ...mm, proposal: { ...mm.proposal, uiState: 'done' } }
+                      : mm);
                     showToast(t('sched.scheduledToast', {
                       when: new Date(m.proposal!.fireAt * 1000).toLocaleString(),
                     }), 'success');
                   } catch (e) {
-                    const msg = e instanceof Error ? e.message : String(e);
-                    setMsgs((arr) => arr.map((mm, mi) =>
-                      mi === i && mm.proposal
-                        ? { ...mm, proposal: { ...mm.proposal, uiState: 'editing', errorMsg: msg } }
-                        : mm
-                    ));
+                    const errMsg = e instanceof Error ? e.message : String(e);
+                    mutate((mm) => mm.proposal
+                      ? { ...mm, proposal: { ...mm.proposal, uiState: 'editing', errorMsg: errMsg } }
+                      : mm);
                   }
                 }}
                 onCancel={() => {
                   // Dismiss the card; the SCHEDULED_TASK_PROPOSED audit
                   // event was already emitted server-side. No persist call.
-                  setMsgs((arr) => arr.map((mm, mi) =>
+                  const cur = useAppState.getState()
+                    .chatMsgsBySession[effectiveSessionId] ?? [];
+                  setChatMsgs(effectiveSessionId, cur.map((mm, mi) =>
                     mi === i && mm.proposal
                       ? { ...mm, proposal: { ...mm.proposal, uiState: 'cancelled' } }
-                      : mm
+                      : mm,
                   ));
                 }}
               />
@@ -1568,6 +1573,21 @@ export function EncounterMode() {
           OR Cmd+V a screen capture / image off the web, and it gets
           uploaded + attached to the next send. */}
       <div className="mt-4 border-t border-border pt-4" onDrop={onDrop} onDragOver={(e) => e.preventDefault()}>
+        {/* F-unified-chat-files — persistent file library for THIS
+            patient. Lives above the composer so the medic always sees
+            which files the AI has access to (📂 chip + click for
+            full drawer). Distinct from `attachments` below, which is
+            the EPHEMERAL "this turn's uploads-in-flight" strip that
+            clears on send. */}
+        {p && (
+          <div className="mb-2">
+            <ChatFileChipStrip
+              scopeKind="patient"
+              scopeRef={p.patientHash}
+              controller={encounterChatFiles}
+            />
+          </div>
+        )}
         {/* Pending attachments — show chips above the input so the
             medic can verify what's going out before they press Send. */}
         {attachments.length > 0 && (

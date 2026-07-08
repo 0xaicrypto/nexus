@@ -442,13 +442,20 @@ def _gather_study_protocol(
     """
     import json as _json
     try:
+        # F-roster-archive-filter — same defensive filter as the
+        # roster query above. A medic who archived a study but
+        # somehow still holds a handle to its study_id (stale URL,
+        # localStorage activeStudyId pointing at a now-archived row,
+        # etc.) should NOT have its protocol body fed back into the
+        # LLM. The active-study guard lives on the read path so any
+        # caller is covered.
         row = conn.execute(
             "SELECT display_name, short_code, phase, status, "
             "       target_n, primary_endpoint, secondary_endpoints_json, "
             "       inclusion_json, exclusion_json, schedule_json, "
             "       stop_rules_json "
             "FROM research_studies "
-            "WHERE user_id = ? AND study_id = ?",
+            "WHERE user_id = ? AND study_id = ? AND archived_at IS NULL",
             (user_id, study_id),
         ).fetchone()
     except sqlite3.Error:
@@ -543,12 +550,20 @@ def _gather_all_studies_summary(
     """
     import json as _json
     try:
+        # F-roster-archive-filter — research_router.archive_study sets
+        # ``archived_at`` but DOESN'T change ``status`` (the study can
+        # still be "enrolling" semantically — archive is a UI-hide
+        # signal, not a lifecycle transition). The sidebar's GET
+        # /studies query DOES filter ``archived_at IS NULL`` (see
+        # research_router.py line 287) but this roster query missed
+        # it, so the LLM kept listing "deleted" studies as active in
+        # the cross-research chat. Anchor the same filter here.
         rows = conn.execute(
             "SELECT study_id, display_name, short_code, phase, status, "
             "       target_n, primary_endpoint, inclusion_json, exclusion_json, "
             "       created_at "
             "FROM research_studies "
-            "WHERE user_id = ? "
+            "WHERE user_id = ? AND archived_at IS NULL "
             "ORDER BY "
             "  CASE COALESCE(status,'draft') "
             "    WHEN 'enrolling' THEN 0 "
@@ -577,7 +592,33 @@ def _gather_all_studies_summary(
             active_rows.append(r)
 
     if not active_rows and not draft_rows:
-        return ""
+        # F-roster-empty-explicit — DON'T return empty here. When the
+        # medic has archived every study, prior chat history (loaded
+        # into the LLM context by retrieve_async) still contains the
+        # AI's previous answers listing those studies as active. Without
+        # an explicit "no studies" signal in the current prompt, the
+        # LLM defaults to echoing its own previous turn ("您目前有 3 项
+        # 活跃研究…") even after the medic clearly deleted them — the
+        # exact bug the medic reported as "我已经删除了这些研究, 但还
+        # 是说是 active 的".
+        #
+        # The current-state block must always win over historical
+        # turns. Emitting an explicit zero-rows section + a strong
+        # instruction below makes "you currently have 0 studies"
+        # impossible for the LLM to ignore.
+        return (
+            "\n\nRESEARCH STUDIES IN THIS WORKSPACE (0 active, 0 draft"
+            + (f", {archived_n} archived — hidden"
+               if archived_n else "")
+            + "):"
+            "\n  (none — the medic has not created any studies yet, "
+            "or every study has been archived)"
+            "\n\n  ★ AUTHORITATIVE CURRENT STATE — if previous turns "
+            "in this conversation referenced studies (e.g. HYBRID-RT-…, "
+            "ES-SCLC-…) they have been ARCHIVED since. Do NOT list them "
+            "as active. When the medic asks 'what studies do I have', "
+            "answer 'none — your study list is empty'."
+        )
 
     def _crit_inline(blob, label, cap):
         try:
@@ -608,6 +649,13 @@ def _gather_all_studies_summary(
         + (f", {archived_n} archived — hidden, not shown unless medic asks"
            if archived_n else "")
         + "):"
+        # F-roster-empty-explicit — declare this block authoritative
+        # so the LLM doesn't sneak in study names it remembers from
+        # earlier turns. Without this, the model regularly listed
+        # archived / deleted studies the medic had moved out.
+        "\n  ★ This is the AUTHORITATIVE current roster. If a study "
+        "name appeared in earlier turns but is NOT listed here, it has "
+        "been archived — do NOT mention it as active."
     ]
 
     if active_rows:
@@ -944,6 +992,16 @@ async def yield_t3_llm(
     )
     if context_block:
         system_prompt += "\n\nPATIENT CONTEXT (from the local clinical graph):\n" + context_block
+    # F-unified-chat-files — patient-scope file library. Files
+    # uploaded inside this patient's chat are scoped to their hash
+    # and surface here as [F1] [F2] for the LLM to cite.
+    if patient_hash:
+        from nexus_server.chat_files_router import _gather_file_lib
+        _patient_file_block = _gather_file_lib(
+            conn, user_id, 'patient', patient_hash,
+        )
+        if _patient_file_block:
+            system_prompt += _patient_file_block
     else:
         # Without this explicit empty marker, the LLM tends to confuse
         # "no context provided" with "answer from training knowledge"
@@ -993,7 +1051,7 @@ async def yield_t3_llm(
             scope_tuple_from_request,
         )
         # Reconstruct the scope tuple from the parameters we already
-        # have. This mirrors chat_router_v2.scope_tuple_from_request.
+        # have. This mirrors chat_router.scope_tuple_from_request.
         _sk, _sr = "other", "__no_patient__"
         if patient_hash:
             _sk, _sr = "patient", patient_hash
@@ -1127,7 +1185,32 @@ async def yield_t3_llm(
                 "the trial's Eligibility Inbox to formally invite the patient — "
                 "you cannot enroll them yourself."
             )
-        system_prompt = system_prompt + cohort_block + external_block + persona_extension
+        # F-unified-chat-files — inject the file-library block so the
+        # LLM can cite [F1] [F2] for files the medic has attached to
+        # this chat surface. The library is keyed by (scope_kind,
+        # scope_ref):
+        #
+        #   * per-study research chat  → ('research', study_id)
+        #   * cross-research chat      → ('cross_research', '__workspace__')
+        #
+        # The frontend uploads with the matching kind via api.uploadFile,
+        # so the read here MUST mirror that mapping exactly or the
+        # files will be invisible to the LLM. (Previously this used
+        # 'research' for BOTH, which silently lost cross-research files.)
+        from nexus_server.chat_files_router import _gather_file_lib
+        if sid == '(unspecified)':
+            _lib_scope_kind = 'cross_research'
+            _lib_scope_ref  = '__workspace__'
+        else:
+            _lib_scope_kind = 'research'
+            _lib_scope_ref  = sid
+        file_block = _gather_file_lib(
+            conn, user_id, _lib_scope_kind, _lib_scope_ref,
+        )
+        system_prompt = (
+            system_prompt + cohort_block + file_block
+            + external_block + persona_extension
+        )
 
     answer_buf: list[str] = []   # accumulates full answer for citation extraction
     try:

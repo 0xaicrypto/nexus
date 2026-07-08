@@ -1,0 +1,305 @@
+# Release the desktop app for macOS, Windows, and Linux on tag push.
+#
+# Trigger
+# =======
+#
+# On `git push --tags` of any tag matching `v*` (e.g. v0.1.0, v0.2.0-rc1).
+# Manual `workflow_dispatch` is also wired so you can re-run a build
+# without cutting a new tag.
+#
+# What it does
+# ============
+#
+# Three matrix jobs build per-OS in parallel using each platform's
+# native runner. They reuse the existing scripts under
+# `packages/desktop/scripts/`, which we don't duplicate here — the
+# CI's job is to set up the SDK + build deps and invoke them.
+#
+#   macos-latest   → packages/desktop/dist/Nexus-macos-universal-*.dmg
+#                    (universal: arm64 + x64 lipo'd)
+#   windows-latest → packages/desktop/dist/Nexus-windows-x64-*.zip
+#                    + Setup-Nexus-v*.exe (Inno Setup)
+#   ubuntu-latest  → packages/desktop/dist/Nexus-linux-x86_64-*.AppImage
+#                    + .tar.gz fallback
+#
+# A final `release` job downloads all three artifacts and creates a
+# GitHub Release in **draft** state — you eyeball the release notes,
+# upload a screenshot, then click Publish.
+#
+# Why draft by default
+# --------------------
+# On signed builds we'd auto-publish. Until we sign, every release
+# needs a hand-written sentence telling users about the right-click /
+# SmartScreen dance, and you really do want to test the .dmg on a
+# fresh Mac before pushing it to anyone. Draft is the right default.
+#
+# Code signing
+# ============
+# Builds here are **unsigned**. Users see "unidentified developer"
+# (macOS) and "Windows protected your PC" (SmartScreen) prompts.
+# Each artifact ships an INSTALL.txt explaining the override, but
+# we should sign before any public-facing launch — see docs/SIGNING.md
+# (TODO) for the upgrade path.
+
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version override for manual runs (e.g. 0.1.0-dev)'
+        required: false
+        default: '0.0.0-manual'
+
+env:
+  DOTNET_VERSION: '10.x'
+  # Quiet down the .NET CLI in CI logs.
+  DOTNET_NOLOGO: 1
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  # ── Resolve the version once and propagate to every build job ────────
+  # Using a setup job avoids each platform doing its own ref-parsing
+  # (bash + PowerShell = two implementations of the same trim).
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION="${{ github.event.inputs.version || '0.0.0-dev' }}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+  # ── macOS: universal .dmg ────────────────────────────────────────────
+  build-macos:
+    needs: resolve-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install librsvg (icon rasterisation)
+        run: brew install librsvg
+
+      # The build script greps <Version> from the csproj. Rather than
+      # invent a new arg-passing protocol, we set the csproj's version
+      # element to the tag value before invoking the script — same code
+      # path runs locally + in CI.
+      - name: Inject release version into csproj
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          CSPROJ="packages/desktop/RuneDesktop.UI/RuneDesktop.UI.csproj"
+          if grep -q '<Version>' "$CSPROJ"; then
+            sed -i.bak "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$CSPROJ"
+          else
+            # Insert after </AssemblyTitle> so it lands inside the right PropertyGroup
+            sed -i.bak "s|</AssemblyTitle>|</AssemblyTitle>\n    <Version>$VERSION</Version>|" "$CSPROJ"
+          fi
+          rm -f "$CSPROJ.bak"
+          grep -n Version "$CSPROJ" || true
+
+      - name: Build .dmg
+        run: bash packages/desktop/scripts/build-macos.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: packages/desktop/dist/*.dmg
+          if-no-files-found: error
+
+  # ── Windows: .zip + Inno Setup .exe ──────────────────────────────────
+  build-windows:
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Inno Setup ships preinstalled on the windows-latest image at
+      # C:\Program Files (x86)\Inno Setup 6\. The build script looks for
+      # iscc.exe on PATH, so prepend that dir.
+      - name: Add Inno Setup to PATH
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6"
+          if (Test-Path $iscc) {
+            echo "$iscc" | Out-File -FilePath $env:GITHUB_PATH -Append
+            Write-Host "Inno Setup found at $iscc"
+          } else {
+            Write-Warning "Inno Setup not preinstalled — installer build will be skipped"
+          }
+
+      - name: Inject release version into csproj
+        shell: pwsh
+        run: |
+          $version = "${{ needs.resolve-version.outputs.version }}"
+          $csproj  = "packages\desktop\RuneDesktop.UI\RuneDesktop.UI.csproj"
+          $content = Get-Content $csproj -Raw
+          if ($content -match '<Version>[^<]*</Version>') {
+            $content = $content -replace '<Version>[^<]*</Version>', "<Version>$version</Version>"
+          } else {
+            $content = $content -replace '</AssemblyTitle>', "</AssemblyTitle>`n    <Version>$version</Version>"
+          }
+          Set-Content -Path $csproj -Value $content -NoNewline
+          Select-String -Path $csproj -Pattern Version
+
+      - name: Build .zip + installer
+        shell: pwsh
+        # -Installer flag triggers the Inno Setup path inside the script.
+        # If iscc.exe isn't on PATH, the script logs a warning + still
+        # ships the zip; we don't want that to fail the job.
+        run: .\packages\desktop\scripts\build-windows.ps1 -Installer
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: |
+            packages/desktop/dist/*.zip
+            packages/desktop/dist/*.exe
+          if-no-files-found: error
+
+  # ── Linux: AppImage + tarball ────────────────────────────────────────
+  build-linux:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install build deps + appimagetool
+        # Two gotchas:
+        #   * appimagetool itself is an AppImage — needs libfuse2 to mount
+        #     itself, which Ubuntu 24.04 runners don't ship by default.
+        #     The libfuse2 package is named libfuse2t64 on 24.04+; try
+        #     both. If FUSE still isn't usable, we fall back to
+        #     `--appimage-extract-and-run` which unpacks each invocation.
+        #   * librsvg2-bin gives us rsvg-convert for icon generation.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin
+          sudo apt-get install -y libfuse2t64 || sudo apt-get install -y libfuse2 || true
+          curl -fsSL https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o /tmp/appimagetool
+          chmod +x /tmp/appimagetool
+          # Probe FUSE — if mount fails, install a wrapper that uses
+          # extract-and-run instead.
+          if /tmp/appimagetool --version >/dev/null 2>&1; then
+            sudo mv /tmp/appimagetool /usr/local/bin/appimagetool
+          else
+            echo "FUSE unavailable — wrapping appimagetool with --appimage-extract-and-run"
+            sudo tee /usr/local/bin/appimagetool >/dev/null <<'EOF'
+          #!/bin/sh
+          exec /tmp/appimagetool --appimage-extract-and-run "$@"
+          EOF
+            sudo chmod +x /usr/local/bin/appimagetool
+          fi
+          appimagetool --version || true
+
+      - name: Inject release version into csproj
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          CSPROJ="packages/desktop/RuneDesktop.UI/RuneDesktop.UI.csproj"
+          if grep -q '<Version>' "$CSPROJ"; then
+            sed -i.bak "s|<Version>[^<]*</Version>|<Version>$VERSION</Version>|" "$CSPROJ"
+          else
+            sed -i.bak "s|</AssemblyTitle>|</AssemblyTitle>\n    <Version>$VERSION</Version>|" "$CSPROJ"
+          fi
+          rm -f "$CSPROJ.bak"
+
+      - name: Build AppImage + tarball
+        run: bash packages/desktop/scripts/build-linux.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: |
+            packages/desktop/dist/*.AppImage
+            packages/desktop/dist/*.tar.gz
+          if-no-files-found: error
+
+  # ── Aggregate + cut a draft Release ──────────────────────────────────
+  release:
+    needs: [resolve-version, build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    # `contents: write` is what lets softprops/action-gh-release push
+    # a Release object to the repo. Default permissions don't include it.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: List collected files
+        run: ls -lh artifacts/
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Nexus ${{ needs.resolve-version.outputs.version }}
+          # Auto-generated notes from PRs / commits since the previous
+          # tag. You can hand-edit before publishing.
+          generate_release_notes: true
+          # Stays as a draft until you manually click Publish in the
+          # GitHub UI — important while builds are unsigned and the
+          # right-click-Open instructions need a once-over per release.
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.dmg
+            artifacts/*.zip
+            artifacts/*.exe
+            artifacts/*.AppImage
+            artifacts/*.tar.gz
+          body: |
+            ## Nexus desktop ${{ needs.resolve-version.outputs.version }}
+
+            **Downloads** — pick the file for your OS:
+
+            | OS      | File                              | Notes                                        |
+            |---------|-----------------------------------|----------------------------------------------|
+            | macOS   | `Nexus-macos-universal-*.dmg`     | Universal binary (Apple Silicon + Intel)     |
+            | Windows | `Setup-Nexus-v*.exe`              | Or the `.zip` if you prefer no installer     |
+            | Linux   | `Nexus-linux-x86_64-*.AppImage`   | `chmod +x` then double-click                 |
+
+            ### First-run prompts (unsigned build)
+
+            **macOS** — "unidentified developer":
+            > Right-click `Nexus.app` → **Open** → confirm. One time only.
+
+            **Windows** — "Windows protected your PC":
+            > Click **More info** → **Run anyway**. One time only.
+
+            **Linux** — no prompt. Run directly.
+
+            After the app opens, the Welcome wizard asks for your Nexus
+            server URL — paste the address from your VPS deploy.

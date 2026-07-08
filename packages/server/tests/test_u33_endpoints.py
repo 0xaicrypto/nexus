@@ -322,15 +322,20 @@ class TestExport:
 
 
 class TestDeletePatient:
-    def test_404_when_nothing_matches(self, client):
+    def test_idempotent_when_nothing_matches(self, client):
+        """Delete is intentionally idempotent — the projection-clear
+        contract is "forget this patient", and forgetting an already-
+        absent patient is success, not failure. The previous 404 on
+        empty-match returned spurious errors in the common case where
+        a sidebar projection had a stale entry but the DELETE found
+        nothing in the canonical tables. See patients_router.delete_patient
+        (lines 681–688) for the rationale."""
         r = client.delete("/api/v1/dicom/patients/deadbeefdeadbeef")
-        assert r.status_code == 404, r.text
-        # Verify it's OUR 404 (route hit, no rows) not FastAPI's
-        # generic "Not Found" (route miss). This pins the desktop's
-        # heuristic: when the desktop sees the generic 404 it tells
-        # the medic to update the server.
-        detail = r.json()["detail"]
-        assert "no rows for patient_hash" in detail
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["patient_hash"] == "deadbeefdeadbeef"
+        # Every counter must be zero — there was nothing to delete.
+        assert all(v == 0 for v in body["deleted"].values()), body
 
     def test_200_after_register_then_delete(self, client):
         # Insert a manual row directly (the existing register endpoint
@@ -358,9 +363,12 @@ class TestDeletePatient:
         assert body["patient_hash"] == ph
         assert body["deleted"]["patients"] == 1
 
-        # A second delete should now 404 — the row's gone.
+        # A second delete is idempotent — returns 200 with deleted=0
+        # for every counter (see test_idempotent_when_nothing_matches
+        # for rationale).
         r2 = client.delete(f"/api/v1/dicom/patients/{ph}")
-        assert r2.status_code == 404, r2.text
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["deleted"]["patients"] == 0
 
     def test_scopes_to_caller(self, client, monkeypatch):
         """Deleting under user A must not touch user B's row with the

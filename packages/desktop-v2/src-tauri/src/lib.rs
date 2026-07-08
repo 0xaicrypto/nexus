@@ -557,7 +557,21 @@ fn spawn_backend_sidecar(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         // line reaches our drain immediately. Without this, PyInstaller
         // can buffer up to 8 KiB and a crash that prints just one
         // exception line leaves us with an empty diag panel.
-        .env("PYTHONUNBUFFERED", "1");
+        .env("PYTHONUNBUFFERED", "1")
+        // F-alembic-ascii: a fresh-from-the-DMG sidecar process inherits
+        // LANG=C from launchctl on macOS when the user has never opened
+        // Terminal. Python's configparser then uses the ASCII codec for
+        // text-mode `open()` calls, and any file with non-ASCII bytes
+        // (em-dashes, smart quotes, CJK comments) blows up with
+        // UnicodeDecodeError before our app even starts. PYTHONUTF8=1
+        // is Python 3.7+'s UTF-8 mode -- it forces ALL stdlib text I/O
+        // (including configparser, json, csv) to UTF-8 regardless of
+        // locale. LANG / LC_ALL are belt-and-suspenders for any C
+        // extensions that read locale directly.
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("LANG", "en_US.UTF-8")
+        .env("LC_ALL", "en_US.UTF-8");
 
     for (k, v) in user_env {
         // Don't overwrite the loopback host/port we just set above.

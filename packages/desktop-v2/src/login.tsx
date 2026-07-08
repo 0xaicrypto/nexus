@@ -29,6 +29,10 @@ export function LoginView() {
   const t                  = useT();
   const setToken           = useAppState((s) => s.setToken);
   const setStoreDisplayName= useAppState((s) => s.setDisplayName);
+  const setActiveUserId    = useAppState((s) => s.setActiveUserId);
+  const setIdentities      = useAppState((s) => s.setIdentities);
+  const resetForIdentitySwitch = useAppState((s) => s.resetForIdentitySwitch);
+  const activeUserId       = useAppState((s) => s.activeUserId);
   const storedName         = useAppState((s) => s.displayName);
   const showToast          = useAppState((s) => s.showToast);
 
@@ -90,12 +94,29 @@ export function LoginView() {
     }
     setBusy(true);
     try {
-      // M0: password is unused on the backend side; we pass '' explicitly
-      // to make the contract obvious for future readers.
+      // F-multiuser-isolation — display_name is the login key now.
+      // Backend matches name (trimmed + casefolded) against users:
+      //   * hit  → activate that identity (returns its existing data)
+      //   * miss → create new identity (empty workspace)
+      // If the resolved user_id is DIFFERENT from whatever was active,
+      // we wipe the in-memory workspace so the new identity doesn't
+      // briefly see the prior identity's patients / chat state.
       const r = await api.login(name, '');
+      if (activeUserId && activeUserId !== r.user_id) {
+        // Identity changed — clear all per-user zustand slices BEFORE
+        // setting the new token so downstream selectors don't fire
+        // against stale state.
+        resetForIdentitySwitch();
+      }
       setToken(r.access_token);
+      setActiveUserId(r.user_id);
+      setIdentities(r.identities);
       setStoreDisplayName(name);  // persist for avatar pill + pre-fill on re-launch
-      showToast('Signed in', 'success');
+      if (r.isNewAccount) {
+        showToast(`已为「${name}」新建独立账号`, 'success');
+      } else {
+        showToast(`已切换到「${name}」`, 'success');
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         setError(
@@ -199,6 +220,14 @@ export function LoginView() {
             />
             <p className="mt-1.5 text-caption text-text-tertiary">
               {t('login.help')}
+            </p>
+            {/* F-multiuser-isolation — make the new contract obvious:
+                same name = re-enter your account; different name =
+                brand-new independent space. Without this hint medics
+                expected "input any name = same data" (the old broken
+                behaviour). */}
+            <p className="mt-1 text-[11px] text-text-tertiary leading-relaxed">
+              💡 输入用过的名字 = 进入原来的工作空间;输入新名字 = 自动建立独立的新账号。
             </p>
           </div>
 

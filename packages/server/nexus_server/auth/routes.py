@@ -832,6 +832,138 @@ async def list_identities() -> IdentitiesListResponse:
     )
 
 
+# ───────────────────────────────────────────────────────────────────────────
+# F-multiuser-isolation — display_name-based login/register
+# ───────────────────────────────────────────────────────────────────────────
+# Background: the medic on a fresh / shared Mac reported "input different
+# username every login, but I keep seeing the SAME data". Root cause: the
+# old ``api.login(name, "")`` ignored the typed name. It first tried
+# Path A (POST /auth/login with the LOCALSTORAGE-cached user_id) and only
+# fell to /register when the cached id was completely missing. So every
+# launch on the same Mac silently re-activated the same UUID. Display name
+# was cosmetic.
+#
+# This endpoint makes display-name the actual login key the medic expects:
+#   * If a user with this display_name already exists → activate that
+#     identity (return its JWT, update identity.json's active_user_id).
+#   * If no match → create a new identity with that name.
+#
+# Match is case-insensitive + trimmed, mirroring how a Mac user thinks
+# about "Doctor Jin" vs "doctor jin". Avatar/emoji default to 🩺 for
+# brand-new identities; existing identities keep their stored emoji.
+
+class LoginByNameRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=64)
+
+
+class LoginByNameResponse(BaseModel):
+    user_id: str
+    jwt_token: str
+    expires_in_seconds: int
+    identity: "IdentityInfo"
+    identities: list["IdentityInfo"]   # full picker context
+    schema_version: int
+    is_new_account: bool               # true if we just created this name
+
+
+@router.post("/login-by-name", response_model=LoginByNameResponse)
+async def login_by_name(req: LoginByNameRequest) -> LoginByNameResponse:
+    """Login OR create a new identity based on the typed display_name.
+
+    The medic types their name on LoginView. We:
+      1. Trim + casefold the input.
+      2. Scan ``users`` (deleted_at IS NULL) for an existing match.
+      3a. Match found → activate it, mint JWT, return.
+      3b. No match → create a new identity, mint JWT, return.
+
+    Either way the response includes the full ``identities`` list so the
+    desktop's picker dropdown is ready immediately without a follow-up
+    /identities GET.
+    """
+    typed = (req.display_name or "").strip()
+    if not typed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="display_name is required",
+        )
+
+    typed_fold = typed.casefold()
+    matched_user_id: Optional[str] = None
+    matched_jwt_secret: Optional[str] = None
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        # Case-insensitive lookup. SQLite's default LIKE is case-
+        # insensitive only for ASCII; medic names may contain CJK
+        # (中文 / 한글 / etc.) so we casefold in Python after a
+        # broad fetch. Users table is tiny (≤ tens of rows in any
+        # realistic deployment) so this is fine.
+        rows = conn.execute(
+            "SELECT id, display_name, jwt_secret FROM users "
+            "WHERE deleted_at IS NULL"
+        ).fetchall()
+        for r in rows:
+            if (r["display_name"] or "").strip().casefold() == typed_fold:
+                matched_user_id = r["id"]
+                matched_jwt_secret = r["jwt_secret"]
+                break
+
+    if matched_user_id is None:
+        # 3b — new identity.
+        user_id, jwt_secret, _now = _create_identity_row(typed, "🩺")
+        is_new = True
+    else:
+        # 3a — reuse existing identity.
+        user_id = matched_user_id
+        jwt_secret = matched_jwt_secret or ""
+        is_new = False
+
+    # Refresh identity.json: rebuild from DB, set THIS user active.
+    _, identities = _rebuild_identity_from_db()
+    _persist_identity_file(user_id, identities)
+
+    # Touch last_active_at so the picker sorts this identity first.
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with get_db_connection() as conn:
+        conn.execute(
+            "UPDATE users SET last_active_at = ? WHERE id = ?",
+            (now_iso, user_id),
+        )
+        conn.commit()
+
+    token, expires_in = create_jwt_token(user_id, jwt_secret)
+    this_identity = next(
+        (i for i in identities if i["user_id"] == user_id), None,
+    )
+    if this_identity is None:
+        # _rebuild_identity_from_db didn't see it — possible on a brand-
+        # new row right before the SELECT cache refreshed. Synthesize a
+        # minimal entry; client only needs user_id + display_name.
+        this_identity = {
+            "user_id":       user_id,
+            "display_name":  typed,
+            "avatar_emoji":  "🩺",
+            "created_at":    now_iso,
+            "last_active_at": now_iso,
+        }
+        identities.append(this_identity)
+
+    logger.info(
+        "login_by_name: %s user_id=%s display=%r (total identities=%d)",
+        "CREATED" if is_new else "ACTIVATED",
+        user_id[:8], typed, len(identities),
+    )
+    return LoginByNameResponse(
+        user_id=user_id,
+        jwt_token=token,
+        expires_in_seconds=expires_in,
+        identity=IdentityInfo(**this_identity),
+        identities=[IdentityInfo(**i) for i in identities],
+        schema_version=CURRENT_IDENTITY_SCHEMA,
+        is_new_account=is_new,
+    )
+
+
+
 class CreateIdentityRequest(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=64)
     avatar_emoji: Optional[str] = Field(default="🩺", max_length=8)

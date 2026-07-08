@@ -161,6 +161,15 @@ def _ensure_uploads_table() -> None:
             # belong to. Empty when the medic uploads outside any
             # patient context.
             "patient_hash TEXT NOT NULL DEFAULT ''",
+            # F-unified-chat-files — chat-surface file library scope.
+            # Canonically added by Alembic migration
+            # versions/0005_unified_chat_files.py (which also builds
+            # the covering index + backfills patient scope). Mirrored
+            # here so environments that create the uploads table via
+            # this lazy path (unit tests, fresh dev DBs that haven't
+            # run alembic yet) can still INSERT the columns.
+            "lib_scope_kind TEXT NOT NULL DEFAULT ''",
+            "lib_scope_ref TEXT NOT NULL DEFAULT ''",
             # NOTE: memory_status / memory_summary / quick_scan_status /
             # quick_scan_summary previously lived here as inline ALTER
             # TABLE statements. They were moved to a proper Alembic
@@ -443,6 +452,16 @@ async def upload_file(
     # to short-circuit both the session→patient_hash lookup and the
     # DICOM-tag-derived hash. Empty string means "no override".
     patient_hash: str = Form(""),
+    # F-unified-chat-files — which chat surface's file library this
+    # upload should join. All four chats pass these:
+    #   patient        → lib_scope_kind='patient',  lib_scope_ref=<patient_hash>
+    #   per-study chat → lib_scope_kind='research', lib_scope_ref=<study_id>
+    #   cross-research → lib_scope_kind='cross_research', lib_scope_ref='__workspace__'
+    #   assistant      → lib_scope_kind='assistant',     lib_scope_ref='__workspace__'
+    # Empty strings preserve the legacy "unattached" mode (e.g. DICOM
+    # zips that self-bind to a patient via DICOM tags).
+    lib_scope_kind: str = Form(""),
+    lib_scope_ref: str = Form(""),
     current_user: str = Depends(get_current_user),
 ) -> UploadResponse:
     """Receive a multipart upload, persist it across the layers of
@@ -707,6 +726,16 @@ async def upload_file(
                 session_id[:8], e,
             )
     now_iso = datetime.now(timezone.utc).isoformat()
+    # F-unified-chat-files — default lib_scope to patient when the
+    # caller didn't pass explicit scope AND we resolved a patient_hash.
+    # This keeps existing per-patient uploads visible in the patient
+    # chat's new file library without the desktop having to pass two
+    # redundant fields on the same call.
+    effective_lib_kind = (lib_scope_kind or "").strip()
+    effective_lib_ref  = (lib_scope_ref  or "").strip()
+    if not effective_lib_kind and inherited_patient_hash:
+        effective_lib_kind = "patient"
+        effective_lib_ref  = inherited_patient_hash
     with get_db_connection() as conn:
         conn.execute(
             """
@@ -715,14 +744,15 @@ async def upload_file(
              created_at, sha256, gnfd_path, extracted_text,
              dicom_status, dicom_study_id, dicom_preview_dir,
              image_normalized_status, image_normalized_path,
-             patient_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+             patient_hash, lib_scope_kind, lib_scope_ref)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (file_id, current_user, name, mime, total,
              str(disk_path), now_iso, sha256, gnfd_path,
              dicom_status, dicom_study_id, dicom_preview_dir,
              image_normalized_status, image_normalized_path_str,
-             inherited_patient_hash),
+             inherited_patient_hash,
+             effective_lib_kind, effective_lib_ref),
         )
         conn.commit()
 
@@ -759,12 +789,98 @@ async def upload_file(
             force_patient_hash=force_patient_hash,
         )
 
+    # F-pdf-ocr-fallback + F-pdf-perpage-vision — kick the OCR pipeline
+    # asynchronously for any file Gemini Vision can read:
+    #   * PDFs (text-layer or scanned, per-page batched if scanned)
+    #   * Direct images (jpg/png/heic/webp/etc) — Vision-only path
+    # All other formats (docx, xlsx, txt) go through the lazy distiller
+    # path triggered by ``read_uploaded_file`` and don't need a
+    # background extractor (the distiller's text-mode handlers are
+    # synchronous and cheap).
+    _name_lc = str(name).lower()
+    _is_pdf = (mime == "application/pdf"
+               or _name_lc.endswith(".pdf"))
+    _is_image = (
+        (mime or "").startswith("image/")
+        or _name_lc.endswith((
+            ".jpg", ".jpeg", ".png", ".webp",
+            ".heic", ".heif", ".gif", ".bmp",
+        ))
+    )
+    if _is_pdf or _is_image:
+        background_tasks.add_task(
+            _run_pdf_extract_async,
+            user_id=current_user, file_id=file_id, name=name,
+            mime=mime, disk_path=str(disk_path),
+        )
+
     return UploadResponse(
         file_id=file_id, name=name, mime=mime, size_bytes=total,
         dicom_status=dicom_status,
         dicom_study_id=dicom_study_id,
         dicom_prerender_active=dicom_prerender_active,
     )
+
+
+def _run_pdf_extract_async(
+    *, user_id: str, file_id: str, name: str, mime: str, disk_path: str,
+) -> None:
+    """Background task — populate ``uploads.extracted_text`` for a
+    just-uploaded PDF or image via the OCR pipeline.
+
+    Despite the legacy ``_pdf_`` name, this also handles direct image
+    uploads (the routing inside ``pdf_extract.extract_and_persist``
+    picks the right path by mime type). PDFs go pypdf → per-page
+    Vision; images go straight to single-image Vision.
+
+    Runs after the synchronous upload response has been flushed, so
+    the medic isn't blocked. Status writes back to
+    ``uploads.text_extraction_status`` so the chip UI can show:
+      * (no badge)  text_layer success
+      * 🤖          vision_ocr success
+      * ⚠           unreadable (medic can re-extract from the UI)
+      * 🔒          encrypted
+
+    Sync wrapper around the async extractor — FastAPI's BackgroundTasks
+    accepts both sync + async callables, but routing through asyncio
+    keeps the inner work explicit.
+    """
+    import asyncio
+    try:
+        from nexus_server.pdf_extract import extract_and_persist
+        asyncio.run(extract_and_persist(
+            user_id=user_id, file_id=file_id,
+            name=name, mime=mime, disk_path=disk_path,
+        ))
+        logger.info(
+            "PDF extract: %s persisted for file_id=%s",
+            name, file_id[:12],
+        )
+    except RuntimeError as exc:
+        # asyncio.run() raises RuntimeError if we're already inside
+        # an event loop (unlikely from a BackgroundTask, but defensive).
+        # Spawn on a fresh thread loop in that case.
+        if "asyncio.run" in str(exc) or "running event loop" in str(exc):
+            import concurrent.futures as _cf
+            with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+                from nexus_server.pdf_extract import extract_and_persist
+                ex.submit(
+                    asyncio.run,
+                    extract_and_persist(
+                        user_id=user_id, file_id=file_id,
+                        name=name, mime=mime, disk_path=disk_path,
+                    ),
+                ).result()
+        else:
+            logger.warning(
+                "PDF extract failed for %s (file_id=%s): %s",
+                name, file_id[:12], exc,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "PDF extract failed for %s (file_id=%s): %s",
+            name, file_id[:12], exc,
+        )
 
 
 def _run_dicom_prerender_async(

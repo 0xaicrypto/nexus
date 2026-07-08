@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from typing import Any
 
 from nexus_server.memorization.chat_ingester import (
@@ -129,12 +130,99 @@ def _parse_json_safe(raw: str) -> dict[str, Any]:
             return json.loads(s[first : last + 1])
         except json.JSONDecodeError as e:
             logger.debug("bracket-match JSON parse failed: %s", e)
+    # Layer 4 — partial-array recovery (F-truncated-extract). When the
+    # LLM output is truncated mid-entity (max_tokens hit, network blip,
+    # whatever), Layers 1-3 all fail because the outer ``{"entities":
+    # [...]}`` is malformed. But the FRONT of the array is fine —
+    # complete `{...}` entity objects sit there waiting to be salvaged.
+    # We scan from the first `{` after `"entities"` (or `"items"` /
+    # `"clinical_entities"`), pulling balanced top-level objects one at
+    # a time and parsing each individually. Stop on the first object
+    # that doesn't parse — that's where the truncation hit.
+    recovered = _recover_partial_entities(s)
+    if recovered:
+        logger.warning(
+            "extractor: top-level JSON unparseable but recovered %d "
+            "complete entities from truncated stream",
+            len(recovered),
+        )
+        return {"entities": recovered}
     logger.warning(
         "extractor LLM output isn't JSON even after fence-strip + "
-        "bracket-recover: %r",
+        "bracket-recover + partial-array recovery: %r",
         s[:200],
     )
     return {}
+
+
+def _recover_partial_entities(s: str) -> list[dict]:
+    """Scan a truncated-or-malformed extractor response and pull out
+    every well-formed entity object that sits before the break.
+
+    Strategy: locate an array opener after one of the known wrapper
+    keys (``"entities"`` / ``"items"`` / ``"clinical_entities"``), then
+    walk forward tracking brace depth (string-aware so `}` inside a
+    string literal doesn't fool us). Each time depth returns to 1
+    (i.e. one level inside the array), we've finished a top-level
+    object — slice it out and try ``json.loads``. Bail at the first
+    failure; everything we collected so far is good.
+
+    Returns an empty list when nothing salvageable. Cheap — O(n) over
+    the string, parses at most one object per yield.
+    """
+    # Find the array opener.
+    array_start = -1
+    for key in ('"entities"', '"items"', '"clinical_entities"'):
+        idx = s.find(key)
+        if idx < 0:
+            continue
+        # Walk past the `:` and any whitespace to the `[`.
+        bracket = s.find("[", idx)
+        if bracket >= 0:
+            array_start = bracket + 1
+            break
+    if array_start < 0:
+        return []
+
+    out: list[dict] = []
+    depth = 0
+    obj_start = -1
+    in_string = False
+    escape = False
+    for i in range(array_start, len(s)):
+        ch = s[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            continue
+        if ch == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                chunk = s[obj_start : i + 1]
+                try:
+                    parsed = json.loads(chunk)
+                except json.JSONDecodeError:
+                    # The truncation hit inside this object. Everything
+                    # we already collected is still good.
+                    break
+                if isinstance(parsed, dict):
+                    out.append(parsed)
+                obj_start = -1
+        elif ch == "]" and depth == 0:
+            # Clean array end — no truncation, just done.
+            break
+    return out
 
 
 def llm_chat_extractor(source_text: str) -> ExtractionResult:
@@ -155,13 +243,15 @@ def llm_chat_extractor(source_text: str) -> ExtractionResult:
                 system_prompt=_SYSTEM,
                 model=None,
                 temperature=0.2,        # low T for extraction determinism
-                # Bumped 1500→3500 in F15: full SOAP encounters
-                # (~600-1500 tokens of source) sometimes truncated
-                # the JSON mid-entity, leaving us with a parse error
-                # and "本轮未记忆 (提取器无返回)". 3500 fits ~25 well-
-                # formed entities comfortably while keeping the
-                # round-trip under the LLM's typical 30s timeout.
-                max_tokens=3500,
+                # F15: bumped 1500→3500 (SOAP truncation).
+                # F-truncated-extract: bumped 3500→6000. Even 3500
+                # truncates dense 老王-style cases (long PET-CT
+                # history + multi-system review). Gemini 2.5 Flash's
+                # output ceiling is 8192; 6000 leaves a margin while
+                # still fitting comfortably in the 30s round-trip.
+                # Layer-4 partial-array recovery in _parse_json_safe
+                # is the belt; this is the suspenders.
+                max_tokens=6000,
                 tools=None,
             )
             return content
@@ -188,6 +278,16 @@ def llm_chat_extractor(source_text: str) -> ExtractionResult:
             entities=[],
             latency_ms=int((time.monotonic() - t0) * 1000),
         )
+
+    # F-extractor-drops — NFC-normalise the source text BEFORE we use
+    # it for verbatim comparisons. macOS APFS hands us Chinese strings
+    # in NFD (decomposed combining marks); the LLM returns NFC. A
+    # naive ``evidence in source_text`` then returns False on what is
+    # visually identical text, and the entity gets dropped at the
+    # ``not_verbatim`` step. Doing the normalisation once here means
+    # downstream cite-back still references the *normalised* form,
+    # which is what twin_event_log stores anyway (read paths NFC).
+    source_text = unicodedata.normalize("NFC", source_text)
 
     parsed = _parse_json_safe(raw)
     # F20 — be liberal in what we accept:
@@ -244,6 +344,10 @@ def llm_chat_extractor(source_text: str) -> ExtractionResult:
         if not isinstance(evidence, str) or not evidence:
             drops["no_evidence"] += 1
             continue
+        # F-extractor-drops — normalise evidence the same way we
+        # normalised source_text above so the verbatim check is
+        # comparing apples to apples.
+        evidence = unicodedata.normalize("NFC", evidence)
         # Verbatim check, with a softened fallback for whitespace +
         # punctuation drift the LLM commonly introduces in Chinese
         # text. Without this fallback we used to drop ~60-80% of
@@ -285,10 +389,19 @@ def llm_chat_extractor(source_text: str) -> ExtractionResult:
         int((time.monotonic() - t0) * 1000),
     )
 
+    # F-extractor-drops — propagate ``drops`` (per-reason kill counts)
+    # and ``raw_count`` (how many entities the LLM emitted) so the
+    # chat_ingester can persist a precise breakdown into
+    # INGESTION_COMPLETED.payload. Without these fields the diagnostic
+    # banner could only say "本轮未记忆"; with them it can say
+    # "LLM 给了 5 条,4 条因 quote 不匹配丢弃,1 条因缺标签丢弃" —
+    # actionable for the medic + for prompt iteration on our side.
     return ExtractionResult(
         raw_llm_output=raw,
         entities=entities,
         latency_ms=int((time.monotonic() - t0) * 1000),
+        drops=drops,
+        raw_count=len(entities_raw),
     )
 
 

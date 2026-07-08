@@ -22,9 +22,6 @@ from nexus_server.event_sourcing import (
 from nexus_server.event_sourcing.handlers import (
     _h_node_added, _h_patient_registered,
 )
-from nexus_server.migrations import (
-    MIGRATIONS, apply_pending, current_schema_version,
-)
 from nexus_server.monai_runtime import ohif_label_bridge
 from nexus_server.monai_runtime.feature_extractors import (
     attach_key_images_to_context,
@@ -43,38 +40,12 @@ from nexus_server.persistence.snapshots import (
 # ─────────────────────────────────────────────────────────────────────
 # Schema migrations
 # ─────────────────────────────────────────────────────────────────────
-
-class TestMigrations:
-    def test_registry_non_empty(self):
-        assert len(MIGRATIONS) >= 1
-        for m in MIGRATIONS:
-            assert m.target_version
-            assert m.description
-            assert callable(m.up)
-
-    def test_apply_pending_runs_on_fresh_db(self, tmp_path):
-        conn = sqlite3.connect(":memory:")
-        init_event_sourcing_schema(conn)
-        # fresh install starts at 3.1 (set by init_event_sourcing_schema)
-        applied = apply_pending(conn)
-        # Should apply all registered migrations with versions > 3.1
-        assert len(applied) >= 1
-        # Re-run is a no-op
-        applied2 = apply_pending(conn)
-        assert applied2 == []
-
-    def test_migration_emits_event(self, tmp_path):
-        conn = sqlite3.connect(":memory:")
-        init_event_sourcing_schema(conn)
-        apply_pending(conn)
-        kinds = [
-            r[0] for r in conn.execute(
-                "SELECT event_kind FROM twin_event_log "
-                "WHERE event_kind = 'schema_migration_applied'"
-            )
-        ]
-        assert all(k == "schema_migration_applied" for k in kinds)
-        assert len(kinds) >= 1
+# The hand-rolled MIGRATIONS registry was retired in favour of Alembic
+# (see nexus_server/migrations/__init__.py docstring). Tests for the
+# new runner live alongside the alembic versions directory; the legacy
+# TestMigrations class that asserted on the old apply_pending() shape
+# was removed in F-test-graveyard-cleanup. Snapshots / feature
+# extractors / OHIF coverage below stays — it never touched migrations.
 
 
 # ─────────────────────────────────────────────────────────────────────

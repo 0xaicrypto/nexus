@@ -109,14 +109,12 @@ def init_patients_table() -> None:
             "CREATE INDEX IF NOT EXISTS idx_patients_user "
             "ON patients(user_id, created_at DESC)"
         )
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_patients_active "
-            "ON patients(user_id, updated_at DESC) "
-            "WHERE archived_at IS NULL"
-        )
         # Defensive: archived_at column ALTER for any pre-existing
         # SHARED-db patients table that was created before this
-        # column existed (legacy intermediate states).
+        # column existed (legacy intermediate states, including the
+        # test fixture that hand-creates the table without it).
+        # MUST run before the partial index — the index references
+        # archived_at and will fail if the column doesn't exist yet.
         try:
             cols = {row[1] for row in c.execute(
                 "PRAGMA table_info(patients)"
@@ -127,6 +125,11 @@ def init_patients_table() -> None:
                 )
         except Exception as e:  # noqa: BLE001
             logger.debug("adding archived_at column failed: %s", e)
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_patients_active "
+            "ON patients(user_id, updated_at DESC) "
+            "WHERE archived_at IS NULL"
+        )
         c.commit()
 
     # Step 2 — one-shot data migration from dicom_index.db.

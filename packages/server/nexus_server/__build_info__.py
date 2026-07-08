@@ -2,6 +2,6 @@
 # This file gets regenerated on every build and committed-as-default
 # stays at the "dev" placeholder.
 VERSION    = "0.1.27"
-BUILD_ID   = "0.1.27+20260627T103243Z.e5a2f87-dirty"
-BUILD_TIME = "2026-06-27T10:32:43Z"
+BUILD_ID   = "0.1.27+20260628T173538Z.e5a2f87-dirty"
+BUILD_TIME = "2026-06-28T17:35:38Z"
 GIT_SHA    = "e5a2f87-dirty"

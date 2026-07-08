@@ -3,7 +3,7 @@ import type { ModeKind, PatientCard, StudySummary, Workspace } from './lib/util'
 // (MOCK_PATIENTS no longer imported — initial state is empty list,
 // real data comes from refreshPatients() after login.)
 import { api, type Identity } from './lib/api-client';
-import type { LlmStatus } from './lib/types';
+import type { ChatMsg, LlmStatus } from './lib/types';
 import {
   readStoredLocale,
   writeStoredLocale,
@@ -60,6 +60,31 @@ interface AppState {
   // along with the JWT) starts in Default.
   activeSessionId: string;
   setActiveSessionId: (id: string) => void;
+
+  // F-chat-state-persist ─────────────────────────────
+  // Per-session in-flight chat state. Lives in zustand (not in the
+  // EncounterMode component) so a streaming turn survives tab
+  // switches: the SSE consumer keeps writing into the store, and on
+  // remount the chat pane rehydrates from the store (mid-stream
+  // text + the streaming flag). Without this, switching tabs mid-
+  // turn made the partial answer vanish until the next history pull.
+  //
+  // Keyed by ``sessionId`` (the same string EncounterMode uses for
+  // ``effectiveSessionId`` — for un-named sessions this is
+  // ``patient-${patient_hash}``, so it's already per-patient).
+  chatMsgsBySession:      Record<string, ChatMsg[]>;
+  chatStreamingBySession: Record<string, boolean>;
+  setChatMsgs:        (sessionId: string, msgs: ChatMsg[]) => void;
+  appendChatMsg:      (sessionId: string, msg: ChatMsg) => void;
+  /** Mutate the last message in a session. Two forms:
+   *   - Partial<ChatMsg>: shallow-merge into last
+   *   - (last) => Partial<ChatMsg>: functional updater for cases
+   *     that need the previous value (e.g. appending to reasoning[]) */
+  updateLastChatMsg:  (
+    sessionId: string,
+    mut: Partial<ChatMsg> | ((last: ChatMsg) => Partial<ChatMsg>),
+  ) => void;
+  setChatStreaming:   (sessionId: string, streaming: boolean) => void;
 
   // Layout ───────────────────────────────────────────
   sidebarCollapsed: boolean;
@@ -321,6 +346,11 @@ export const useAppState = create<AppState>((set, get) => ({
       llmStatusChecked: false,
       contextRailContent: { kind: 'closed' },
       contextRailOpen: false,
+      // F-chat-state-persist — wipe per-session chat state on
+      // identity swap so the next user doesn't see the previous
+      // user's drafted message buffer.
+      chatMsgsBySession:      {},
+      chatStreamingBySession: {},
     });
   },
 
@@ -346,6 +376,9 @@ export const useAppState = create<AppState>((set, get) => ({
       // Drop the cached LLM status — next sign-in re-probes.
       llmStatus: null,
       llmStatusChecked: false,
+      // F-chat-state-persist — see resetForIdentitySwitch.
+      chatMsgsBySession:      {},
+      chatStreamingBySession: {},
     });
   },
 
@@ -392,6 +425,39 @@ export const useAppState = create<AppState>((set, get) => ({
     } catch { /* ignore */ }
     set({ activeSessionId: id });
   },
+
+  // F-chat-state-persist — see interface block for rationale.
+  chatMsgsBySession:      {},
+  chatStreamingBySession: {},
+  setChatMsgs: (sessionId, msgs) =>
+    set((s) => ({
+      chatMsgsBySession: { ...s.chatMsgsBySession, [sessionId]: msgs },
+    })),
+  appendChatMsg: (sessionId, msg) =>
+    set((s) => {
+      const cur = s.chatMsgsBySession[sessionId] ?? [];
+      return {
+        chatMsgsBySession: { ...s.chatMsgsBySession, [sessionId]: [...cur, msg] },
+      };
+    }),
+  updateLastChatMsg: (sessionId, mut) =>
+    set((s) => {
+      const cur = s.chatMsgsBySession[sessionId];
+      if (!cur || cur.length === 0) return {};
+      const last = cur[cur.length - 1];
+      const patch = typeof mut === 'function' ? mut(last) : mut;
+      const next = [...cur.slice(0, -1), { ...last, ...patch }];
+      return {
+        chatMsgsBySession: { ...s.chatMsgsBySession, [sessionId]: next },
+      };
+    }),
+  setChatStreaming: (sessionId, streaming) =>
+    set((s) => ({
+      chatStreamingBySession: {
+        ...s.chatStreamingBySession,
+        [sessionId]: streaming,
+      },
+    })),
 
   sidebarCollapsed: false,
   contextRailOpen: false,

@@ -194,3 +194,51 @@ export type ChatStreamChunk =
       needs_user_input: string[];
     }
   | { type: 'error'; message: string };
+
+/**
+ * F-chat-state-persist — ChatMsg + ChatProposal lifted out of
+ * `modes.tsx` so the zustand store can carry them across tab
+ * switches. Lives in this shared types file alongside the related
+ * CitationRef / ChatStreamChunk so the SSE consumer can write
+ * directly into the store without a circular import on modes.tsx.
+ */
+export interface ChatProposal {
+  proposalId:     string;
+  kind:           'send_email';
+  fireAt:         number;
+  userTz:         string;
+  summary:        string;
+  payload:        Record<string, unknown>;
+  recurrenceCron: string | null;
+  sessionId:      string | null;
+  patientHash:    string | null;
+  needsUserInput: string[];
+  uiState:        'editing' | 'submitting' | 'done' | 'cancelled';
+  errorMsg?:      string;
+}
+
+export interface ChatMsg {
+  role: 'user' | 'agent';
+  text: string;
+  ts: string;
+  tier?: TierKind;
+  reasoning?: string[];
+  citations?: CitationRef[];
+  elapsedMs?: number;
+  streaming?: boolean;
+  attachedFileNames?: string[];
+  proposal?: ChatProposal | null;
+  webResults?: Array<{
+    w_id: number;
+    url: string;
+    title: string;
+    snippet: string;
+    domain: string;
+  }>;
+  memoryIngested?: {
+    ok: boolean;
+    nodeCount: number;
+    rawCount: number;
+    error?: string;
+  };
+}

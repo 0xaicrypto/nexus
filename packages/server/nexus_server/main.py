@@ -263,6 +263,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import asyncio as _asyncio
     import os as _os
 
+    # F-bundled-sidecar-silent-exit — Tauri pipes our stderr to the
+    # desktop's diag panel via a non-blocking IPC. If the FastAPI
+    # lifespan raises BEFORE the first chat round, we've seen the
+    # traceback occasionally drop on the floor (pipe buffer never
+    # flushed before the process exits). Belt-and-suspenders: also
+    # write any startup failure to a file in $RUNE_HOME so the medic
+    # can grep it post-mortem. The path is opportunistic — if
+    # $RUNE_HOME isn't writable we silently continue with stderr only.
+    _crash_dump_path = None
+    try:
+        _rune_home = _os.environ.get("RUNE_HOME")
+        if _rune_home:
+            _crash_dir = Path(_rune_home) / "logs"
+            _crash_dir.mkdir(parents=True, exist_ok=True)
+            _crash_dump_path = _crash_dir / "sidecar-startup-failure.log"
+    except Exception:
+        _crash_dump_path = None
+
+    def _dump_startup_failure(stage: str, exc: BaseException) -> None:
+        import traceback as _tb
+        import datetime as _dt
+        if _crash_dump_path is None:
+            return
+        try:
+            with _crash_dump_path.open("a", encoding="utf-8") as f:
+                f.write(
+                    f"\n=== {_dt.datetime.now(_dt.timezone.utc).isoformat()} "
+                    f"startup failed at: {stage} ===\n"
+                )
+                f.write(f"build={BUILD_INFO.get('build')} "
+                        f"version={BUILD_INFO.get('version')}\n")
+                _tb.print_exception(
+                    type(exc), exc, exc.__traceback__, file=f,
+                )
+                f.write("=== end ===\n")
+        except Exception:
+            pass
+
     # Startup
     logger.info(
         "Starting Nexus API Server (build %s, version %s, built_at %s)",
@@ -285,6 +323,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("DB migrations applied; head=%s", head)
     except Exception as exc:
         logger.exception("DB migration failed — refusing to start: %s", exc)
+        _dump_startup_failure("run_migrations", exc)
         raise
     # init_db remains as a belt-and-suspenders idempotent call for
     # any tables not yet captured in 0001 (e.g. modules that lazy-init
@@ -643,6 +682,11 @@ def create_app() -> FastAPI:
     # never wired into the app on the rename, which is why uploads
     # have been 404'ing in the desktop ("Skipped: file.pdf 404").
     app.include_router(files.router)
+    # F-unified-chat-files — per-chat file library (patient / research /
+    # cross-research / assistant), all 4 chat surfaces share the same
+    # REST shape. See docs/design/UNIFIED_CHAT_FILES.md.
+    from nexus_server import chat_files_router
+    app.include_router(chat_files_router.router)
     # Phase B: legacy /api/v1/sync/anchors read endpoint moved out of
     # the deleted sync_hub into agent_state.sync_router. Same path,
     # different module.

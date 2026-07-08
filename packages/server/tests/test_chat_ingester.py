@@ -25,7 +25,6 @@ from nexus_server.event_sourcing.replay import full_rebuild
 from nexus_server.event_sourcing.schema import PROJECTION_TABLES
 from nexus_server.memorization import (
     ChatIngester,
-    QuoteVerificationError,
     StructuredEntity,
 )
 from nexus_server.memorization.chat_ingester import make_stub_extractor
@@ -191,37 +190,48 @@ class TestIngestEncounter:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestQuoteVerification:
-    def test_paraphrased_quote_rejected(self, store, conn):
-        user_id = "dr_test"
-        patient_hash = "p_quote"
-        resp_idx = _seed_chat_encounter(
-            store, user_id, patient_hash, "sess-q1",
-            user_text="?",
-            assistant_text="The left renal mass is stable.",
-        )
+    """Hallucination defense now lives in the extractor (F20 + F-extractor
+    -drops). The chat_ingester is a pass-through that trusts whatever the
+    extractor returns — it no longer raises ``QuoteVerificationError`` on
+    paraphrased entities. These tests verify the new boundary:
 
-        bad = StructuredEntity(
-            node_type="finding",
-            content={"label": "renal mass"},
-            # This is a paraphrase, not verbatim. Must be rejected.
-            evidence_quote="The left kidney mass is unchanged.",
-        )
-        ingester = ChatIngester(
-            store=store, conn=conn,
-            extractor=make_stub_extractor([bad]),
-        )
-        with pytest.raises(QuoteVerificationError, match="not found verbatim"):
-            ingester.ingest_encounter(
-                user_id=user_id, patient_hash=patient_hash,
-                encounter_id="sess-q1", source_event_idx=resp_idx,
+      * extractor drops paraphrased entities and bumps
+        ``drops['not_verbatim']``
+      * the resulting empty entity list means no clinical-fact node is
+        emitted by chat_ingester (replay-equivalent to "nothing happened")
+
+    The verbatim contract itself (``evidence_quote`` must be a substring
+    of source_text, modulo NFC + fuzzy_rescue) is enforced in
+    ``llm_extractor.llm_chat_extractor`` — see test below.
+    """
+
+    def test_extractor_drops_paraphrased_quotes(self):
+        """Paraphrased quote → extractor drops it with reason
+        ``not_verbatim`` (instead of the historical raise from
+        chat_ingester). The drops counter is what surfaces to the UI."""
+        from unittest.mock import patch
+        from nexus_server.memorization.llm_extractor import llm_chat_extractor
+
+        async def fake_call_llm(*_a, **_kw):
+            return (
+                '{"entities": ['
+                ' {"node_type":"finding","content":{"label":"renal mass"},'
+                '  "evidence_quote":"The left kidney mass is unchanged."}'
+                ']}',
+                "gemini-2.5-flash", "stop", [],
             )
+        with patch("nexus_server.llm_gateway.call_llm", new=fake_call_llm):
+            result = llm_chat_extractor("The left renal mass is stable.")
+        assert result.raw_count == 1
+        assert result.entities == []
+        assert result.drops.get("not_verbatim") == 1
 
-    def test_quote_failure_does_not_leave_partial_state(self, store, conn):
-        """If quote verification fails mid-batch, no node should be in the
-        projection — the failure aborts before any clinical-fact emission.
-        (The patient_registered + ingestion_started + ingestion_llm_response
-        events DO commit; that's correct — they're not clinical facts and
-        replay produces the same partial chain.)"""
+    def test_ingester_with_empty_extractor_emits_no_findings(self, store, conn):
+        """When the extractor (correctly) drops every entity, chat_ingester
+        commits the audit-trail events (ingestion_started + completed) but
+        zero NODE_ADDED. Replay-equivalent to "no clinical facts" — the
+        Memory tab stays empty, and the diagnostic banner can read the
+        drop counters from INGESTION_COMPLETED.payload."""
         user_id = "dr_test"
         patient_hash = "p_partial"
         resp_idx = _seed_chat_encounter(
@@ -230,35 +240,140 @@ class TestQuoteVerification:
             assistant_text="Mass is 2.4 cm.",
         )
 
-        ingester = ChatIngester(
-            store=store, conn=conn,
-            extractor=make_stub_extractor([
-                StructuredEntity(
-                    node_type="finding",
-                    content={"label": "mass"},
-                    evidence_quote="Mass is 2.4 cm",  # OK
-                ),
-                StructuredEntity(
-                    node_type="finding",
-                    content={"label": "ghost"},
-                    # Hallucinated — not in source
-                    evidence_quote="There is also a 1cm lesion in the spleen.",
-                ),
-            ]),
-        )
-        with pytest.raises(QuoteVerificationError):
-            ingester.ingest_encounter(
-                user_id=user_id, patient_hash=patient_hash,
-                encounter_id="sess-p", source_event_idx=resp_idx,
+        from nexus_server.memorization.chat_ingester import ExtractionResult
+
+        def empty_extractor(_source: str) -> ExtractionResult:
+            """Stub that returns the same shape llm_chat_extractor would
+            on a 'all paraphrased, nothing kept' batch."""
+            return ExtractionResult(
+                raw_llm_output="",
+                entities=[],
+                drops={"not_verbatim": 2},
+                raw_count=2,
             )
 
-        # No finding node should have been written.
+        ingester = ChatIngester(store=store, conn=conn,
+                                extractor=empty_extractor)
+        ingester.ingest_encounter(
+            user_id=user_id, patient_hash=patient_hash,
+            encounter_id="sess-p", source_event_idx=resp_idx,
+        )
+
+        # No finding nodes — extractor dropped them all.
         finding_count = conn.execute(
             "SELECT COUNT(*) FROM clinical_graph_nodes "
             "WHERE user_id = ? AND patient_hash = ? AND node_type = 'finding'",
             (user_id, patient_hash),
         ).fetchone()[0]
         assert finding_count == 0
+
+        # …but INGESTION_COMPLETED still got emitted with the drop counts,
+        # so the UI banner can show "LLM gave 2, dropped 2 at not_verbatim".
+        rows = conn.execute(
+            "SELECT payload_json FROM twin_event_log "
+            "WHERE user_id = ? AND patient_hash = ? "
+            "  AND event_kind = 'ingestion_completed'",
+            (user_id, patient_hash),
+        ).fetchall()
+        assert len(rows) == 1
+        payload = json.loads(rows[0][0])
+        assert payload["emitted_node_count"] == 0
+        assert payload["raw_count"] == 2
+        assert payload["drops"]["not_verbatim"] == 2
+
+
+# ─────────────────────────────────────────────────────────────────────
+# F-truncated-extract — partial-array recovery when the LLM stream
+# gets cut off mid-entity (token-limit / network glitch).
+# ─────────────────────────────────────────────────────────────────────
+
+class TestTruncatedExtractRecovery:
+    """The LLM emits ``{"entities": [..., {...}, {...}, {...incomplete``
+    when it hits max_tokens (or for any other reason runs out of
+    stream). The original parser saw "unparseable JSON" and dropped
+    EVERYTHING, including the 2 well-formed entities at the front of
+    the array.
+
+    Layer-4 recovery in ``_parse_json_safe`` walks the array brace-
+    aware and yields each complete object until it hits the truncation,
+    so 2-of-N entities survive instead of 0-of-N. This is the bug the
+    medic hit with patient 老王 (long PET-CT history → JSON cut off
+    at the third finding, all entities silently dropped).
+    """
+
+    # The exact pattern reported from the desktop diagnostic banner —
+    # three findings, the last one truncated mid-object.
+    _OLAWANG_RAW = (
+        '```json\n{"entities": [\n'
+        '  {\n'
+        '    "node_type": "finding",\n'
+        '    "content": {\n'
+        '      "label": "咳嗽",\n'
+        '      "canonical_en": "cough"\n'
+        '    },\n'
+        '    "evidence_quote": "咳嗽 2 月",\n'
+        '    "confidence": 1.0\n'
+        '  },\n'
+        '  {\n'
+        '    "node_type": "finding",\n'
+        '    "content": {\n'
+        '      "label": "气紧",\n'
+        '      "canonical_en": "shortness of breath"\n'
+        '    },\n'
+        '    "evidence_quote": "气紧 2 周",\n'
+        '    "confidence": 1.0\n'
+        '  },\n'
+        '  {\n'
+        '    "node_type": "finding"'   # <- truncated
+    )
+
+    def test_truncated_array_rescues_complete_objects(self):
+        from nexus_server.memorization.llm_extractor import (
+            _parse_json_safe, _recover_partial_entities,
+        )
+        # Direct recovery function — pulls 2 well-formed objects out.
+        rescued = _recover_partial_entities(self._OLAWANG_RAW)
+        assert len(rescued) == 2
+        assert rescued[0]["content"]["label"] == "咳嗽"
+        assert rescued[0]["evidence_quote"] == "咳嗽 2 月"
+        assert rescued[1]["content"]["label"] == "气紧"
+        assert rescued[1]["evidence_quote"] == "气紧 2 周"
+        # Full parser short-circuits to recovery when the outer JSON
+        # is busted, surfaces the rescued entities under "entities".
+        parsed = _parse_json_safe(self._OLAWANG_RAW)
+        assert len(parsed["entities"]) == 2
+
+    def test_well_formed_json_unchanged_by_recovery(self):
+        from nexus_server.memorization.llm_extractor import _parse_json_safe
+        ok = (
+            '{"entities": [{"node_type":"finding",'
+            '"content":{"label":"x"},"evidence_quote":"q","confidence":0.9}]}'
+        )
+        parsed = _parse_json_safe(ok)
+        assert len(parsed["entities"]) == 1
+        assert parsed["entities"][0]["content"]["label"] == "x"
+
+    def test_garbage_returns_empty(self):
+        from nexus_server.memorization.llm_extractor import _parse_json_safe
+        assert _parse_json_safe("hello world no json here") == {}
+        assert _parse_json_safe("") == {}
+
+    def test_braces_inside_string_dont_confuse_depth_tracker(self):
+        from nexus_server.memorization.llm_extractor import _recover_partial_entities
+        # The evidence_quote string literal contains a `}` — the
+        # brace-aware walker MUST skip it. Without string-awareness
+        # we'd mis-count depth and slice the entity in half.
+        s = (
+            '{"entities": ['
+            '{"node_type":"finding","content":{"label":"x"},'
+            '"evidence_quote":"the closing brace } is part of text",'
+            '"confidence":0.9},'
+            '{"node_type":"finding","content":{"label":"y"},'   # truncated
+        )
+        rescued = _recover_partial_entities(s)
+        assert len(rescued) == 1
+        assert rescued[0]["content"]["label"] == "x"
+        assert "}" in rescued[0]["evidence_quote"]
 
 
 # ─────────────────────────────────────────────────────────────────────

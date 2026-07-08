@@ -259,64 +259,55 @@ class _ApiClient {
    * `_password` is kept in the signature so existing call sites
    * compile unchanged; we ignore it.
    */
-  async login(displayName: string, _password: string): Promise<{ access_token: string }> {
-    interface RegisterResponse {
-      user_id: string;
-      jwt_token: string;
-      created_at: string;
-    }
-    interface LoginResponse {
-      jwt_token: string;
+  async login(displayName: string, _password: string): Promise<{
+    access_token:  string;
+    user_id:       string;
+    isNewAccount:  boolean;
+    activeUserId:  string;
+    identities:    Identity[];
+  }> {
+    // F-multiuser-isolation — display_name is the login key.
+    //
+    // Old behaviour (the bug medic reported "换名字看到老数据"):
+    //   1) Read cached user_id from sessionStorage
+    //   2) POST /auth/login with that id → ignore the typed name
+    //   3) Same data every login regardless of name
+    //
+    // New behaviour:
+    //   POST /auth/login-by-name → backend matches trimmed +
+    //   casefolded display_name against users table:
+    //     - hit → activate that identity, return its JWT
+    //     - miss → create a brand-new identity, return its JWT
+    //   Either way the response carries the full identities list so
+    //   the picker dropdown is ready immediately.
+    //
+    //   Caller is responsible for calling
+    //   ``useAppState.getState().resetForIdentitySwitch()`` BEFORE
+    //   replacing the token whenever ``user_id`` differs from the
+    //   previously-active one — otherwise the workspace would briefly
+    //   show the previous identity's patients / studies / chat state
+    //   with the new JWT, before the next refresh wipes them.
+    interface Raw {
+      user_id:            string;
+      jwt_token:          string;
       expires_in_seconds: number;
+      identity:           IdentityRaw;
+      identities:         IdentityRaw[];
+      schema_version:     number;
+      is_new_account:     boolean;
     }
-
-    const cachedUserId = readUserId();
-
-    // Path A: try login with the cached user_id.
-    if (cachedUserId) {
-      try {
-        const r = await this.fetch<LoginResponse>('/api/v1/auth/login', {
-          method: 'POST',
-          body: JSON.stringify({ user_id: cachedUserId }),
-        });
-        return { access_token: r.jwt_token };
-      } catch (err) {
-        // Per F18 — fall back to /register on a WIDER set of failures:
-        //   404 → user_id not found (DB reset / switched servers)
-        //   400 → malformed cached id (corrupt localStorage)
-        //   5xx → backend lost the users table / mid-migration crash
-        //         (this used to leave the user PERMANENTLY locked at
-        //          the login screen with a "Server error" toast — no
-        //          recovery path because we never re-tried as a fresh
-        //          register. Now we clear the cached id and let Path B
-        //          mint a new account.)
-        // Anything else (network drop, abort) still bubbles up to the
-        // UI so the medic sees an honest "backend unreachable" rather
-        // than a confusing silent re-register.
-        const isRecoverable =
-          err instanceof ApiError && (
-            err.status === 404 ||
-            err.status === 400 ||
-            err.status >= 500
-          );
-        if (isRecoverable) {
-          // Clear cached id so Path B mints a fresh account instead of
-          // re-sending the same dead identifier on the next attempt.
-          clearUserId();
-          // fallthrough to Path B
-        } else {
-          throw err;
-        }
-      }
-    }
-
-    // Path B: no cached id, or cached id was invalid → register fresh.
-    const r = await this.fetch<RegisterResponse>('/api/v1/auth/register', {
+    const r = await this.fetch<Raw>('/api/v1/auth/login-by-name', {
       method: 'POST',
       body: JSON.stringify({ display_name: displayName }),
     });
     writeUserId(r.user_id);
-    return { access_token: r.jwt_token };
+    return {
+      access_token:  r.jwt_token,
+      user_id:       r.user_id,
+      isNewAccount:  r.is_new_account,
+      activeUserId:  r.user_id,
+      identities:    r.identities.map(_castIdentity),
+    };
   }
 
   /** Clear the cached user_id. Used by Settings → "Sign out / forget me".
@@ -364,6 +355,104 @@ class _ApiClient {
       recoveredFromDb: r.recovered_from_db,
       activeUserId:    r.user_id,
       identities:      r.identities.map(_castIdentity),
+    };
+  }
+
+  /* ─────────────────── F-unified-chat-files — chat file lib ──────── */
+
+  async listChatFiles(opts: {
+    scopeKind: 'patient' | 'research' | 'cross_research' | 'assistant';
+    scopeRef: string;
+    includeRemoved?: boolean;
+  }): Promise<{
+    files: Array<{
+      fileId: string;
+      name: string;
+      mime: string;
+      sizeBytes: number;
+      createdAt: string;
+      fIdToken: string;
+      textExtractionStatus: string;
+      hasText: boolean;
+      deletedAt?: number | null;
+    }>;
+    totalActive: number;
+    totalRemoved: number;
+  }> {
+    interface RawFile {
+      file_id: string;
+      name: string;
+      mime: string;
+      size_bytes: number;
+      created_at: string;
+      f_id_token: string;
+      text_extraction_status: string;
+      has_text: boolean;
+      deleted_at?: number | null;
+    }
+    interface Raw {
+      files: RawFile[];
+      total_active: number;
+      total_removed: number;
+      scope_kind: string;
+      scope_ref: string;
+    }
+    const qs = new URLSearchParams({
+      scope_kind: opts.scopeKind,
+      scope_ref:  opts.scopeRef,
+    });
+    if (opts.includeRemoved) qs.set('include_removed', 'true');
+    const r = await this.fetch<Raw>(`/api/v1/chat/files?${qs.toString()}`);
+    return {
+      files: r.files.map((f) => ({
+        fileId: f.file_id, name: f.name, mime: f.mime,
+        sizeBytes: f.size_bytes, createdAt: f.created_at,
+        fIdToken: f.f_id_token,
+        textExtractionStatus: f.text_extraction_status,
+        hasText: f.has_text,
+        deletedAt: f.deleted_at ?? null,
+      })),
+      totalActive: r.total_active,
+      totalRemoved: r.total_removed,
+    };
+  }
+
+  async deleteChatFile(fileId: string): Promise<{ fileId: string; deletedAt: number }> {
+    interface Raw { file_id: string; deleted_at: number }
+    const r = await this.fetch<Raw>(
+      `/api/v1/chat/files/${encodeURIComponent(fileId)}`,
+      { method: 'DELETE' },
+    );
+    return { fileId: r.file_id, deletedAt: r.deleted_at };
+  }
+
+  async restoreChatFile(fileId: string): Promise<{ fileId: string }> {
+    interface Raw { file_id: string }
+    const r = await this.fetch<Raw>(
+      `/api/v1/chat/files/${encodeURIComponent(fileId)}/restore`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    return { fileId: r.file_id };
+  }
+
+  async reextractChatFile(fileId: string): Promise<{
+    fileId: string;
+    textExtractionStatus: string;
+    textLength: number;
+  }> {
+    interface Raw {
+      file_id: string;
+      text_extraction_status: string;
+      text_length: number;
+    }
+    const r = await this.fetch<Raw>(
+      `/api/v1/chat/files/${encodeURIComponent(fileId)}/reextract`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    return {
+      fileId: r.file_id,
+      textExtractionStatus: r.text_extraction_status,
+      textLength: r.text_length,
     };
   }
 
@@ -752,6 +841,12 @@ class _ApiClient {
        *  hash so the backend BINDS the upload to that patient instead
        *  of minting a new patient from the DICOM PatientID tag. */
       patientHash?: string;
+      /** F-unified-chat-files — which chat surface's library this
+       *  upload joins. One of 'patient' | 'research' | 'cross_research'
+       *  | 'assistant'. Omitted = legacy unattached behaviour. */
+      libScopeKind?: 'patient' | 'research' | 'cross_research' | 'assistant';
+      /** Scope target: patient_hash / study_id / '__workspace__'. */
+      libScopeRef?: string;
       onProgress?: (loaded: number, total: number) => void;
     },
   ): Promise<{
@@ -779,6 +874,8 @@ class _ApiClient {
       form.append('file', file, filename);
       if (options?.sessionId)   form.append('session_id',   options.sessionId);
       if (options?.patientHash) form.append('patient_hash', options.patientHash);
+      if (options?.libScopeKind) form.append('lib_scope_kind', options.libScopeKind);
+      if (options?.libScopeRef)  form.append('lib_scope_ref',  options.libScopeRef);
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${baseUrl}/api/v1/files/upload`);
       if (this.token) xhr.setRequestHeader('Authorization', `Bearer ${this.token}`);
