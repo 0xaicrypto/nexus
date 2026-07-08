@@ -5,7 +5,7 @@ recipient gating, and LLM tool-call wrappers in one ~850-line module).
 v2 splits the transport off into this dedicated module — it's needed by
 the new REST router (``email_router.py``) which the desktop hits when
 the medic clicks "Send" in the Compose dialog. The LLM tool-call layer
-is intentionally NOT ported: the v2 chat path (``chat_router_v2`` +
+is intentionally NOT ported: the v2 chat path (``chat_router`` +
 ``retrieval_tiers``) is SSE streaming over a single Gemini call and
 doesn't expose function-calling. If/when we add tool-calling back we
 can layer the LLM tool on top of these primitives without duplicating

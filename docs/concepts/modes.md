@@ -8,7 +8,7 @@ in a SQLite file on the server's disk".
 
 ### Chain mode
 
-- Every event_log append → BNB Greenfield PUT (durable copy).
+- Every event_log append → durable local data-store write.
 - Periodically → BSC `AgentStateExtension.updateStateRoot(token_id, hash)`
   call (verifiability).
 - Identity is on-chain: ERC-8004 token in `IdentityRegistry`.
@@ -16,9 +16,8 @@ in a SQLite file on the server's disk".
 
 ### Local mode
 
-- Every event_log append → just SQLite. No Greenfield, no BSC.
+- Every event_log append → just SQLite. No BSC.
 - No on-chain identity.
-- No bucket.
 
 Functionally **the chat works identically in both modes** — same DPM,
 same ABC, same self-evolution. The only difference is whether the
@@ -55,7 +54,6 @@ def _resolve_chain_kwargs(user_id):
         "agent_state_address": ...,
         "task_manager_address": ...,
         "identity_registry_address": ...,
-        "greenfield_bucket": bucket_for_agent(token_id),
     }
 ```
 
@@ -78,19 +76,14 @@ Three legitimate use cases:
 
 ## What chain mode commits to
 
-When chain mode is active, **every event_log.append triggers a
-write-behind to Greenfield**. The PUT is async — the chat response
-returns before the PUT completes — but each PUT is WAL-protected so a
-crash doesn't lose data.
+When chain mode is active, **every event_log.append is persisted to
+the backend's durable local store synchronously** — once the call
+returns, the data is on disk.
 
 ```python
 # In SDK ChainBackend.store_json:
-self._cache_write(path, raw)              # 1. local cache (instant)
-self._wal.append({"path": path, ...})     # 2. WAL (durable)
-self._fire_and_forget(_do_put())          # 3. async Greenfield PUT
-                                          #    on success → WAL truncate
-                                          #    on cancel → WAL replay next
-                                          #    startup
+self._cache_write(path, raw)              # synchronous durable write
+return content_hash                       # SHA-256 of the bytes
 ```
 
 State-root anchoring on BSC is **not per-event**. The ChainBackend

@@ -152,7 +152,7 @@ async def delete_session_endpoint(
         hides it from the sidebar's default list; PATCH archived=False
         brings it back. Returns 204.
       * ``hard=true`` — full delete. Tells twin to wipe SQLite rows for
-        this session_id, drop pending Greenfield writes, and clear the
+        this session_id, drop stored session objects, and clear the
         ``nexus_sessions`` metadata row. BSC state-root anchors are
         immutable on chain and stay; the response notes the orphan count
         and the immutability of historic anchors. Returns 200 + summary.
@@ -187,7 +187,7 @@ async def delete_session_endpoint(
     # Order matters: twin runs cleanup FIRST so the audit trail event
     # ('session_deleted') gets written into the still-existing
     # event_log + still-existing sessions row before we drop them.
-    twin_result = {"deleted_event_count": 0, "greenfield": {}, "bsc_anchors_immutable_note": ""}
+    twin_result = {"deleted_event_count": 0, "storage": {}, "bsc_anchors_immutable_note": ""}
     try:
         from nexus_server.twin_manager import get_twin
         twin = await get_twin(current_user)
@@ -209,7 +209,7 @@ async def delete_session_endpoint(
         "session_id": session_id,
         "hard_deleted": True,
         "deleted_event_count": twin_result.get("deleted_event_count", 0),
-        "greenfield": twin_result.get("greenfield", {}),
+        "storage": twin_result.get("storage", {}),
         "bsc_note": twin_result.get(
             "bsc_anchors_immutable_note",
             "BSC state-root anchors are immutable on chain — historic "

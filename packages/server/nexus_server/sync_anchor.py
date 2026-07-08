@@ -1,4 +1,4 @@
-"""Background anchoring of synced events to Greenfield + BSC.
+"""Background anchoring of synced events to BSC.
 
 After every successful ``/api/v1/sync/push``, the handler calls
 :func:`enqueue_anchor` which:
@@ -6,40 +6,38 @@ After every successful ``/api/v1/sync/push``, the handler calls
   1. Inserts a ``sync_anchors`` row in ``status='pending'`` so the work
      is durable across crashes / restarts.
   2. Schedules an asyncio task that:
-       a. Builds a JSON payload of the just-pushed events.
-       b. PUTs it to Greenfield (returns SHA-256 content hash).
-       c. Calls :py:meth:`BSCClient.update_state_root` to anchor the
+       a. Builds a canonical JSON payload of the just-pushed events and
+          computes its SHA-256 content hash.
+       b. Calls :py:meth:`BSCClient.update_state_root` to anchor the
           hash into the user's ERC-8004 AgentStateExtension.
-       d. Updates the ``sync_anchors`` row with final status.
+       c. Updates the ``sync_anchors`` row with final status.
 
 Design notes:
 
 * The task is fire-and-forget — the client's ``/sync/push`` returns
   immediately on the SQLite write. The anchor row is the way the client
-  later learns whether the durable copy actually landed.
+  later learns whether the anchor actually landed.
 
 * All chain calls happen via :func:`asyncio.to_thread` because the SDK's
   web3 + HTTP calls are synchronous; running them inline would block the
   event loop.
 
-* If the user has no ``chain_agent_id`` yet (never registered via
-  ``chain_proxy.register-agent``), we record ``awaiting_registration``
-  and DO NOT skip the Greenfield write — the durable copy still goes up;
-  the BSC anchor can be replayed later when registration completes.
+* If the user has no ``chain_agent_id`` yet (never registered), we record
+  ``awaiting_registration``; the BSC anchor can be replayed later when
+  registration completes.
 
 * Test override hook: set ``_chain_backend_test_override`` to a fake with
-  the methods ``put_json(obj, path) -> sha`` and
-  ``anchor(agent_id, content_hash, runtime) -> tx_hash``. The real path
-  is the same shape so tests need only stub the boundary, not web3.
+  the method ``anchor(agent_id, content_hash, runtime) -> tx_hash``. The
+  real path is the same shape so tests need only stub the boundary, not
+  web3.
 """
 
 import asyncio
 import hashlib
 import json
 import logging
-import threading
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from nexus_server.config import get_config
 from nexus_server.database import get_db_connection
@@ -49,22 +47,11 @@ config = get_config()
 
 
 # ───────────────────────────────────────────────────────────────────────────
-# Per-agent backends.
-#
-# Architectural note (2026-04 correction):
-#
-# Each ERC-8004 agent gets its OWN Greenfield bucket: ``nexus-agent-{tokenId}``.
-# That mirrors NFT ownership semantics — the bucket lives or dies with the
-# agent, and a future export/transfer of agent ownership maps to a single
-# resource. The shared "rune-server-sync" bucket the first iteration used
-# was wrong: it conflated all users into one Greenfield namespace.
+# Chain backend.
 #
 # Implementation:
 #   - One BSCClient process-wide (BSC client doesn't care which agent;
 #     same signer signs every tx).
-#   - One GreenfieldClient PER chain_agent_id, cached. Each instance shares
-#     the same Node daemon (class-level _daemon_proc in GreenfieldClient).
-#     Bucket auto-create on first put is already handled by GreenfieldClient.
 #   - AnchorBackend.anchor first calls setActiveRuntime if needed, THEN
 #     updateStateRoot — the AgentStateExtension contract requires this
 #     pairing (the runtime parameter to updateStateRoot is checked against
@@ -76,31 +63,11 @@ config = get_config()
 
 
 _chain_backend_test_override = None  # set by tests
-_greenfield_by_agent: dict[int, Any] = {}
 _chain_client = None  # singleton for BSC
-_init_lock = threading.Lock()
-
-
-def _bucket_for_agent(chain_agent_id: int) -> str:
-    """Greenfield bucket name for an ERC-8004 agent.
-
-    Delegates to :func:`nexus_core.utils.agent_id.bucket_for_agent`
-    so SDK / Nexus / server all agree on the convention. SDK falls back
-    gracefully if the import fails (older SDK builds without the helper).
-    """
-    try:
-        from nexus_core.utils.agent_id import bucket_for_agent
-        return bucket_for_agent(chain_agent_id)
-    except Exception:
-        return f"nexus-agent-{chain_agent_id}"
 
 
 class AnchorBackend:
     """Thin protocol that sync_anchor needs from the chain layer."""
-
-    async def put_json(self, payload: Any, path: str) -> str:
-        """Store JSON payload, return whatever object path Greenfield used."""
-        raise NotImplementedError
 
     def anchor(
         self, agent_id_int: int, content_hash_hex: str, runtime: str
@@ -110,29 +77,9 @@ class AnchorBackend:
 
 
 class _RealAnchorBackend(AnchorBackend):
-    def __init__(self, greenfield, chain_client, runtime_address: str):
-        self._gf = greenfield
+    def __init__(self, chain_client, runtime_address: str):
         self._chain = chain_client
         self._runtime = runtime_address
-        self._bucket_ready = False  # set after first ensure_bucket() succeeds
-
-    async def put_json(self, payload: Any, path: str) -> str:
-        # GreenfieldClient.put doesn't auto-create the bucket — it assumes
-        # the bucket is there and falls back to local cache if not. For our
-        # per-agent buckets that don't exist yet on a fresh deploy, we
-        # explicitly call ensure_bucket() once and cache the result.
-        if not self._bucket_ready:
-            try:
-                ok = await self._gf.ensure_bucket()
-                self._bucket_ready = bool(ok)
-                if not ok:
-                    logger.warning(
-                        "ensure_bucket returned False for %s — put may fail",
-                        getattr(self._gf, "_bucket_name", "?"),
-                    )
-            except Exception as e:
-                logger.warning("ensure_bucket raised: %s", e)
-        return await self._gf.put_json(payload, object_path=path)
 
     def anchor(
         self, agent_id_int: int, content_hash_hex: str, runtime: str
@@ -231,11 +178,10 @@ def _get_chain_client_singleton():
 
 
 def _get_backend_for_agent(chain_agent_id: int) -> Optional[AnchorBackend]:
-    """Return an AnchorBackend whose Greenfield bucket is per-agent.
+    """Return the AnchorBackend for an agent.
 
-    Cached per chain_agent_id so we share the SDK's Node daemon and don't
-    repeatedly probe the chain for bucket existence. Tests bypass via
-    ``_chain_backend_test_override``.
+    The BSC client is a process-wide singleton (same signer for every
+    agent). Tests bypass via ``_chain_backend_test_override``.
     """
     if _chain_backend_test_override is not None:
         return _chain_backend_test_override
@@ -244,40 +190,7 @@ def _get_backend_for_agent(chain_agent_id: int) -> Optional[AnchorBackend]:
     if chain is None:
         return None
 
-    if chain_agent_id in _greenfield_by_agent:
-        return _RealAnchorBackend(
-            _greenfield_by_agent[chain_agent_id], chain, chain.address or ""
-        )
-
-    with _init_lock:
-        if chain_agent_id in _greenfield_by_agent:
-            gf = _greenfield_by_agent[chain_agent_id]
-        else:
-            try:
-                from nexus_core.greenfield import GreenfieldClient
-            except Exception as e:
-                logger.warning("SDK Greenfield unavailable: %s", e)
-                return None
-
-            pk = config.SERVER_PRIVATE_KEY or ""
-            if pk and not pk.startswith("0x"):
-                pk = "0x" + pk
-            is_mainnet = "mainnet" in config.NEXUS_NETWORK
-            try:
-                gf = GreenfieldClient(
-                    private_key=pk,
-                    bucket_name=_bucket_for_agent(chain_agent_id),
-                    network="mainnet" if is_mainnet else "testnet",
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to build GreenfieldClient for agent %d: %s",
-                    chain_agent_id, e,
-                )
-                return None
-            _greenfield_by_agent[chain_agent_id] = gf
-
-    return _RealAnchorBackend(gf, chain, chain.address or "")
+    return _RealAnchorBackend(chain, chain.address or "")
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -319,7 +232,6 @@ def _update_anchor(
     anchor_id: int,
     *,
     status: str,
-    greenfield_path: Optional[str] = None,
     bsc_tx_hash: Optional[str] = None,
     error: Optional[str] = None,
 ) -> None:
@@ -330,13 +242,12 @@ def _update_anchor(
             """
             UPDATE sync_anchors
             SET status = ?,
-                greenfield_path = COALESCE(?, greenfield_path),
                 bsc_tx_hash = COALESCE(?, bsc_tx_hash),
                 error = COALESCE(?, error),
                 updated_at = ?
             WHERE anchor_id = ?
             """,
-            (status, greenfield_path, bsc_tx_hash, error, now, anchor_id),
+            (status, bsc_tx_hash, error, now, anchor_id),
         )
         conn.commit()
 
@@ -357,7 +268,7 @@ def _fetch_chain_agent_id(user_id: str) -> Optional[int]:
 
 
 def compute_content_hash(payload_bytes: bytes) -> str:
-    """SHA-256 hex of the serialized payload — also the Greenfield content key."""
+    """SHA-256 hex of the serialized payload — the anchored content key."""
     return hashlib.sha256(payload_bytes).hexdigest()
 
 
@@ -383,17 +294,15 @@ def serialize_batch(user_id: str, sync_ids: list[int], events: list[dict]) -> by
 async def _run_anchor_job(
     anchor_id: int,
     user_id: str,
-    payload_bytes: bytes,
     content_hash: str,
 ) -> None:
     """The actual background work.
 
-    Order matters now that bucket is per-agent:
-      1. Resolve chain_agent_id. Without it, we don't know which bucket
-         to write to — defer Greenfield until registration completes.
-      2. Build the per-agent backend (cached after first hit).
-      3. Greenfield put using object path scoped under the agent.
-      4. BSC anchor (the backend itself handles the setActiveRuntime
+    Order:
+      1. Resolve chain_agent_id. Without it, we can't anchor — defer
+         until registration completes.
+      2. Build the backend (BSC client is a process-wide singleton).
+      3. BSC anchor (the backend itself handles the setActiveRuntime
          pre-flight before updateStateRoot).
     """
     # 0. If a test override is in effect we don't need an agent id at all
@@ -404,12 +313,11 @@ async def _run_anchor_job(
             _update_anchor(anchor_id, status="stored_only")
             return
 
-    # 1. Need chain_agent_id for both bucket name AND BSC anchor.
+    # 1. Need chain_agent_id for the BSC anchor.
     chain_agent_id = _fetch_chain_agent_id(user_id)
     if chain_agent_id is None:
-        # Greenfield bucket name is `nexus-agent-{tokenId}`, so we can't
-        # even pick a bucket without registration. Mark and let the daemon
-        # come back to it once /chain/register-agent succeeds.
+        # Mark and let a later retry come back to it once registration
+        # succeeds.
         _update_anchor(
             anchor_id,
             status="awaiting_registration",
@@ -418,7 +326,7 @@ async def _run_anchor_job(
         )
         return
 
-    # 2. Per-agent backend (one bucket per ERC-8004 token id).
+    # 2. Backend (BSC singleton behind a thin per-call wrapper).
     backend = _get_backend_for_agent(int(chain_agent_id))
     if backend is None:
         logger.info(
@@ -428,26 +336,7 @@ async def _run_anchor_job(
         _update_anchor(anchor_id, status="stored_only")
         return
 
-    # The Greenfield object path stays nested under the agent for clarity
-    # even though the bucket is already per-agent — makes manual browsing
-    # via DCellar easier.
-    object_path = f"sync/{content_hash}.json"
-
-    # 3. Greenfield write
-    try:
-        gf_path = await backend.put_json(json.loads(payload_bytes), object_path)
-        _update_anchor(
-            anchor_id, status="pending",
-            greenfield_path=(
-                f"nexus-agent-{chain_agent_id}/{gf_path or object_path}"
-            ),
-        )
-    except Exception as e:
-        logger.error("Anchor %d: Greenfield put failed: %s", anchor_id, e)
-        _update_anchor(anchor_id, status="failed", error=f"greenfield: {e}")
-        return
-
-    # 4. BSC anchor (backend handles setActiveRuntime pre-flight)
+    # 3. BSC anchor (backend handles setActiveRuntime pre-flight)
     try:
         tx_hash = await asyncio.to_thread(
             backend.anchor, int(chain_agent_id), content_hash, ""
@@ -480,12 +369,12 @@ def enqueue_anchor(user_id: str, sync_ids: list[int], events: list[dict]) -> int
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(
-            _run_anchor_job(anchor_id, user_id, payload_bytes, content_hash)
+            _run_anchor_job(anchor_id, user_id, content_hash)
         )
     except RuntimeError:
         # No event loop (e.g. called from a sync test). Run inline.
         asyncio.run(
-            _run_anchor_job(anchor_id, user_id, payload_bytes, content_hash)
+            _run_anchor_job(anchor_id, user_id, content_hash)
         )
 
     return anchor_id
@@ -498,7 +387,7 @@ def list_anchors_for_user(user_id: str, limit: int = 50) -> list[dict]:
         cursor.execute(
             """
             SELECT anchor_id, first_sync_id, last_sync_id, event_count,
-                   content_hash, greenfield_path, bsc_tx_hash, status,
+                   content_hash, bsc_tx_hash, status,
                    error, created_at, updated_at, retry_count
             FROM sync_anchors
             WHERE user_id = ?
@@ -515,13 +404,12 @@ def list_anchors_for_user(user_id: str, limit: int = 50) -> list[dict]:
             "last_sync_id": r[2],
             "event_count": r[3],
             "content_hash": r[4],
-            "greenfield_path": r[5],
-            "bsc_tx_hash": r[6],
-            "status": r[7],
-            "error": r[8],
-            "created_at": r[9],
-            "updated_at": r[10],
-            "retry_count": r[11] or 0,
+            "bsc_tx_hash": r[5],
+            "status": r[6],
+            "error": r[7],
+            "created_at": r[8],
+            "updated_at": r[9],
+            "retry_count": r[10] or 0,
         }
         for r in rows
     ]

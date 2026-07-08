@@ -26,7 +26,7 @@ bnbchain_agent/
     flush.py          #   FlushPolicy, WriteAheadLog
   backends/           # Storage implementations
     local.py          #   File-based, no chain
-    chain.py          #   BSC + Greenfield + WAL + daemon
+    chain.py          #   Local data store + BSC anchoring
     mock.py           #   In-memory for tests
   providers/          # Domain-specific data managers
     session.py        #   SessionProviderImpl (with backend load)
@@ -50,7 +50,6 @@ bnbchain_agent/
   builder.py          # local() / testnet() / mainnet() / builder() entry points
   state.py            # StateManager
   chain.py            # BSCClient (BSC contracts)
-  greenfield.py       # GreenfieldClient (storage + persistent daemon)
   keystore.py         # Keystore (encrypted wallet)
 ```
 
@@ -70,7 +69,7 @@ bnbchain_agent/
 ├───────────────────────────────────────────────────────┤
 │  Backends (Local, Chain, Mock)                         │
 ├───────────────────────────────────────────────────────┤
-│  BNB Chain (BSC + Greenfield)                          │
+│  BNB Chain (BSC anchoring)                             │
 └───────────────────────────────────────────────────────┘
 ```
 
@@ -99,7 +98,7 @@ Enterprise properties: deterministic replay, auditable rationale (2 LLM calls vs
 
 ### Auto-Compact (EventLogCompactor)
 
-When the event log grows beyond 30K chars, the compactor triggers a background projection and writes the result back to the EventLog as a `memory_compact` event. This event syncs to Greenfield like any other, ensuring compact summaries are on-chain.
+When the event log grows beyond 30K chars, the compactor triggers a background projection and writes the result back to the EventLog as a `memory_compact` event. This event is persisted like any other, and its state root is anchored on-chain.
 
 ```python
 from bnbchain_agent.memory import EventLogCompactor
@@ -112,61 +111,21 @@ if compactor.should_compact(turn_count=20):
     # 2. CuratedMemory (MEMORY.md / USER.md) updated as derived view
 ```
 
-## Greenfield Data Structure
+## Object-Store Data Structure
 
-### Layout B — One bucket per agent (CANONICAL)
-
-```
-nexus-agent-{erc8004_token_id}/                 ← Bucket per ERC-8004 NFT
-  sync/
-    {content_hash}.json                        ← One JSON per anchor batch
-  sessions/...
-  memory/...
-  contracts/...
-  curated_memory/...
-```
-
-This is the canonical layout for any SDK consumer that has an
-ERC-8004 token id — Nexus Server, Nexus production deployments,
-multi-tenant SaaS. Use the helper:
-
-```python
-from bnbchain_agent import bucket_for_agent
-
-bucket = bucket_for_agent(token_id)            # → "nexus-agent-864"
-backend = ChainBackend(private_key=..., greenfield_bucket=bucket)
-```
-
-Rationale:
-- **Aligns storage ownership with NFT ownership.** Each ERC-8004 agent
-  is an ERC-721 token. The bucket lives or dies with the token; a
-  future "transfer agent" workflow maps to a single resource.
-- **Quota / billing per agent.** Multi-tenant SaaS can attach quota,
-  retention, and billing to a single Greenfield resource.
-- **Blast radius isolation.** A malformed write or compromised agent
-  can only affect its own bucket.
-- **Naming is well-formed.** ERC-8004 tokenIds are uint256; the bucket
-  name `nexus-agent-{N}` stays under Greenfield's 63-char ceiling for
-  any realistic N and avoids the IP-address-shape rule.
-
-### Layout A — Single shared bucket (LEGACY)
+The decentralised object-storage data plane (BNB Greenfield) has been
+removed. ChainBackend persists data to a local content-addressed store
+(``NEXUS_CACHE_DIR``); an S3-compatible mirror is planned as the
+remote durability layer.
 
 ```
-nexus-agent-state/
-  agents/{agent_id}/
-    sessions/...
-    memory/...
-    ...
+{NEXUS_CACHE_DIR}/
+  agents__{agent_id}__event_log__snapshot.json   ← EventLog snapshots
+  namespaces__{ns}__v{NNNN}.json                 ← typed-store versions
+  files__{file_id}__{name}                       ← uploaded file blobs
 ```
 
-`GreenfieldClient` and `ChainBackend` still accept the legacy single
-bucket name `nexus-agent-state` for backward compatibility, but emit a
-`DeprecationWarning` at construction time. Standalone Nexus dev
-sessions that haven't acquired an ERC-8004 token id may still rely on
-this — they should pass `bucket_name=...` explicitly to silence the
-warning, or migrate to Layout B once they register on chain.
-
-EventLog events (including `memory_compact`) are the canonical data. Everything else is a derived view. On-chain verification: `SHA-256(greenfield_data) == bsc_state_root`.
+EventLog events (including `memory_compact`) are the canonical data. Everything else is a derived view. On-chain verification: `SHA-256(stored_data) == bsc_state_root`.
 
 ## Contract Architecture (ABC)
 
@@ -196,24 +155,19 @@ Update Drift Score D(t) = w_c × compliance + w_d × distributional
 
 User-defined rules (from conversation) are persisted as soft constraints. Cannot override hard constraints.
 
-## Greenfield Storage
+## Data Persistence
 
 ```
 Agent calls store_json(path, data)
     │
-    ├── 1. Write to local cache (instant)
-    ├── 2. Append to WAL (crash-safe)
-    └── 3. Fire async Greenfield PUT via persistent Node.js daemon
-              │
-              └── Daemon: SDK init once → reuse for all PUTs (no cold start)
+    └── Write to the local content-addressed store (synchronous,
+        durable on return)
 ```
 
-WAL ensures cancelled writes are replayed on next startup. Daemon eliminates the 2-3s Node.js cold start per operation.
-
-## Two-Chain Model
+## Storage Split
 
 **BSC**: Small tamper-proof commitments (32-byte SHA-256 hashes). ERC-8004/8183 identity registry.
 
-**Greenfield**: Actual data (sessions, memories, artifacts). Content-addressed: hash(payload) = on-chain pointer.
+**Object store**: Actual data (sessions, memories, artifacts). Content-addressed: hash(payload) = on-chain pointer.
 
-Verification: `SHA-256(greenfield_data) == bsc_state_root`
+Verification: `SHA-256(stored_data) == bsc_state_root`

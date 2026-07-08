@@ -515,12 +515,12 @@ class TestBug_EngineInitParallel:
 
 # ══════════════════════════════════════════════════════════════════════
 # Bug: Graceful shutdown — close() cancelled bg tasks after only 3s,
-# causing pending Greenfield writes to be lost on exit
+# causing pending background writes to be lost on exit
 # ══════════════════════════════════════════════════════════════════════
 
 class TestBug_GracefulShutdown:
     """DigitalTwin.close() had only a 3s grace period for background tasks.
-    With Greenfield PUT latency of 2-5s, the last turn's data was often lost.
+    With slow post-turn work, the last turn's data was often lost.
     Now uses 15s grace + emits shutdown_sync event for user feedback."""
 
     def test_close_uses_generous_grace_period(self):

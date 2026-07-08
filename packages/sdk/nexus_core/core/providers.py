@@ -359,7 +359,7 @@ class AgentRuntime:
         """Drain pending writes and release resources.
 
         Calls backend.close() which, for ChainBackend, waits for
-        pending Greenfield writes to finish before shutting down.
+        pending background anchor tasks to finish before shutting down.
         """
         if self._backend is not None and hasattr(self._backend, "close"):
             await self._backend.close()

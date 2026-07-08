@@ -416,7 +416,7 @@ def test_recover_from_chain_requires_backend(tmp_path):
 #
 # `chain_status()` returns one of three states per namespace version:
 #   "local"     — written to disk only
-#   "mirrored"  — in Greenfield, but agent state_root not re-anchored since
+#   "mirrored"  — persisted by the backend, but state_root not re-anchored since
 #   "anchored"  — last_anchor_at >= last_commit_at
 # ─────────────────────────────────────────────────────────────────────────────
 

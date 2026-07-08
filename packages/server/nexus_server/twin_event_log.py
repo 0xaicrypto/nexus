@@ -13,7 +13,7 @@ mirror and read directly from each user's twin EventLog SQLite file.
 Why this isn't reading via ``DigitalTwin.create``
 -------------------------------------------------
 Instantiating a twin is heavy (LLM client init, ChainBackend bring-up,
-session restore from Greenfield). The ``/agent/state`` snapshot — and
+session restore). The ``/agent/state`` snapshot — and
 the polled ``/agent/timeline`` / ``/agent/memories`` requests behind
 the desktop sidebar — must be fast and shouldn't trigger any of that.
 SDK's ``EventLog`` is plain SQLite under the hood (one ``events`` table,

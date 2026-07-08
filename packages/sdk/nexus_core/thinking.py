@@ -75,9 +75,9 @@ logger = logging.getLogger(__name__)
 
 # Bytes threshold below which a thinking step's ``content`` rides
 # inline in the EventLog row's ``metadata.raw_content``. Anything
-# larger is offloaded to a Greenfield blob (the EventLog row keeps
-# only the sha256 + blob path + a short preview), so the chain WAL
-# stays compact and state-root hashing stays fast even when Gemini
+# larger is offloaded to a backend blob (the EventLog row keeps
+# only the sha256 + blob path + a short preview), so the event rows
+# stay compact and state-root hashing stays fast even when Gemini
 # emits a 50KB chain-of-thought.
 _DEFAULT_INLINE_CAP = 2048
 
@@ -245,7 +245,7 @@ class ThinkingEmitter:
         inline_cap: int = _DEFAULT_INLINE_CAP,
     ) -> None:
         """Hook the emitter to a persistent EventLog + (optional)
-        Greenfield blob writer.
+        backend blob writer.
 
         After ``attach``, every ``emit()`` ALSO appends a
         ``thinking_step`` event into the EventLog so the agent's
@@ -254,9 +254,9 @@ class ThinkingEmitter:
 
         ``blob_writer(path, data) -> awaitable`` lets us offload
         oversize content (Gemini chain-of-thought, tool result blobs)
-        to Greenfield instead of bloating the EventLog row.
+        to the storage backend instead of bloating the EventLog row.
         Implementations should be non-blocking — the emitter calls
-        them via ``asyncio.create_task`` so a slow Greenfield PUT
+        them via ``asyncio.create_task`` so a slow write
         can't stall the chat path.
 
         Best-effort: if attach is never called, the emitter behaves
@@ -359,7 +359,7 @@ class ThinkingEmitter:
           * Small content (≤ inline_cap bytes) rides inline in
             ``metadata.raw_content`` — the EventLog row is the
             canonical source.
-          * Large content is offloaded to Greenfield via the
+          * Large content is offloaded to the backend via the
             blob_writer; the EventLog row stores
             ``metadata.content_hash`` (sha256) + ``metadata.blob_path``
             + a 512-char preview so the UI can still show
@@ -397,12 +397,11 @@ class ThinkingEmitter:
             meta["content_hash"] = sha
             meta["content_bytes"] = len(content_bytes)
             meta["blob_path"] = blob_path
-            meta["content_storage"] = "greenfield_blob"
+            meta["content_storage"] = "backend_blob"
             # Fire-and-forget the blob upload. We can't await here
             # (emit is sync) but ``asyncio.create_task`` schedules
             # the coroutine on the running loop; ChainBackend's
-            # store_blob then writes local cache instantly and
-            # write-behinds to Greenfield.
+            # store_blob writes the local store synchronously.
             if self._blob_writer is not None:
                 try:
                     loop = asyncio.get_running_loop()
@@ -415,7 +414,7 @@ class ThinkingEmitter:
                     # sync test). Skip the blob upload — the EventLog
                     # row still has the hash + preview, recovery code
                     # can re-upload later if the row's blob_path
-                    # turns up empty in Greenfield.
+                    # turns up empty in the store.
                     pass
                 except Exception as e:  # noqa: BLE001
                     logger.debug("thinking blob schedule failed: %s", e)

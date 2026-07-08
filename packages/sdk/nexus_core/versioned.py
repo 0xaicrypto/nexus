@@ -29,7 +29,7 @@ Chain mirroring (Phase D)
 -------------------------
 ``VersionedStore`` accepts an optional ``chain_backend`` (any
 ``StorageBackend`` implementation — typically the ``ChainBackend``
-that owns the WAL + Greenfield write-behind). When set:
+that owns the durable object store + BSC anchoring). When set:
 
 * ``propose()`` mirrors the new version (and updated pointer) to
   ``namespaces/<chain_namespace>/<version>.json`` and
@@ -154,9 +154,9 @@ class VersionedStore:
         """Return a 3-state chain-mirror status for the current
         version:
 
-        * ``"local"`` — committed locally, not yet mirrored to
-          Greenfield (or no chain_backend configured)
-        * ``"mirrored"`` — Greenfield received the blob; agent
+        * ``"local"`` — committed locally, not yet persisted by
+          the chain backend (or no chain_backend configured)
+        * ``"mirrored"`` — the chain backend stored the blob; agent
           state_root has not been re-anchored since the last
           commit
         * ``"anchored"`` — ``last_anchor_at`` ≥ ``last_commit_at``;
@@ -185,13 +185,10 @@ class VersionedStore:
         }
         if version is None or committed_at is None:
             return result
-        # Probe the chain backend's local cache for the blob path.
-        # ChainBackend writes to local cache synchronously and
-        # fires Greenfield write-behind; "mirrored" means the
-        # write-behind queue has drained. We approximate this with
-        # ``is_path_mirrored`` (added in ChainBackend below) — when
-        # not available (mock backends), we fall back to "the path
-        # was at least scheduled" which is good-enough for tests.
+        # Probe the chain backend's store for the blob path via
+        # ``is_path_mirrored`` — when not available (mock backends),
+        # we fall back to "the path was at least scheduled" which is
+        # good-enough for tests.
         backend = self._chain_backend
         if backend is None:
             return result

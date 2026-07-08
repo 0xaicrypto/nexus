@@ -9,7 +9,7 @@ Assumes:
 - User has a registered server account.
 - `SERVER_PRIVATE_KEY` is set (chain mode).
 - User has been chatting for a while (twin already exists in memory,
-  has an ERC-8004 token, has a Greenfield bucket).
+  has an ERC-8004 token).
 
 ## Stage 1 — desktop sends
 
@@ -67,35 +67,32 @@ TwinManager._create_twin(user_id):
   │     ├── SERVER_PRIVATE_KEY set? yes
   │     ├── chain_active_rpc? yes
   │     ├── _read_chain_agent_id(user_id) → 866 (cached from prior chat)
-  │     ├── bucket_for_agent(866) = "nexus-agent-866"
   │     └── return { private_key, network="testnet", rpc_url,
   │                  agent_state_address, identity_registry_address,
-  │                  task_manager_address, greenfield_bucket }
+  │                  task_manager_address }
   │
   ├── DigitalTwin.create(
   │       agent_id="user-22183952",
-  │       greenfield_bucket="nexus-agent-866",
   │       cached_agent_id=866,         ← Bug 2 fix: skip re-register
   │       …chain_kwargs)
-  │     └── In SDK: nexus_core.testnet(private_key=..., greenfield_bucket=...)
+  │     └── In SDK: nexus_core.testnet(private_key=...)
   │           ├── ChainBackend.__init__:
-  │           │     ├── GreenfieldClient(bucket_name="nexus-agent-866", ...)
-  │           │     ├── BSCClient(rpc_url, private_key, ...)
-  │           │     └── WAL replay (resume any incomplete writes from prior boot)
+  │           │     ├── local data store at NEXUS_CACHE_DIR
+  │           │     └── BSCClient(rpc_url, private_key, ...)
   │           └── return AgentRuntime(backend=ChainBackend)
   │
   ├── twin._save_identity_cache(866, wallet) ← Bug 2: pre-seed
   ├── twin._initialize():
   │     ├── identity check (cache hit, no chain call)
   │     ├── evolution.initialize() — load persona, skills, knowledge
-  │     ├── restore last session checkpoint from Greenfield
+  │     ├── restore last session checkpoint from the data store
   │     └── ProjectionMemory + EventLogCompactor wired
   │
   └── twin.on_event = _build_on_event(user_id)
       _sessions[user_id] = TwinSession(twin)
 ```
 
-Cold start takes 5–10s on first ever chat (BSC ID lookup + Greenfield
+Cold start takes a few seconds on first ever chat (BSC ID lookup +
 session restore). Subsequent users hit the `_sessions` cache and skip
 all of this.
 
@@ -111,19 +108,8 @@ Inside `DigitalTwin.chat("hello")`:
 2. event_log.append("user_message", "hello", session_id="session_ab12")
    ├── SDK EventLog: INSERT INTO events (...)
    │     SQLite at ~/.nexus_server/twins/{user_id}/event_log/user-22183952.db
-   ├── ChainBackend._greenfield_write_behind:
-   │     ├── _cache_write(...) — instant local cache
-   │     ├── WAL.append({ path: "agents/user-22183952/events/.../12.json",
-   │     │                hash: "abc...", size: 142 })
-   │     └── fire_and_forget(_do_put):
-   │           └── async: GreenfieldClient.put(bytes, object_path)
-   │                 ├── _ensure_bucket_once() ← Bug 1 fix
-   │                 │     first time: ensure_bucket() → create bucket
-   │                 │     subsequent: cached True
-   │                 └── HTTPS PUT → SP "nexus-agent-866/events/.../12.json"
-   │                     log: "[WRITE][Greenfield] PUT ... (142 bytes) 0.5s"
-   │                     ↑ captured by _ChainActivityLogHandler →
-   │                       INSERT INTO twin_chain_events (Bug 3 visibility)
+   ├── ChainBackend.store_json:
+   │     └── _cache_write(...) — synchronous local data store write
 
 3. Build context:
    event_count = self.event_log.count() = 67
@@ -159,7 +145,7 @@ Inside `DigitalTwin.chat("hello")`:
 6. DriftScore.update(hard_score=1.0, soft_score=1.0, "chat")
 
 7. event_log.append("assistant_response", response, session_id=...)
-   └── Same as step 2: SQLite + Greenfield PUT
+   └── Same as step 2: SQLite + data-store write
 
 8. on_event mirror — IF twin emits any event during chat (e.g.
    memory_compact background fire), _build_on_event hook writes a row
@@ -172,7 +158,7 @@ Inside `DigitalTwin.chat("hello")`:
    │     ├── SkillEvolver: detect new skills used
    │     └── (every 10 turns) PersonaEvolver.trigger_reflection()
    ├── Save session checkpoint:
-   │     └── Checkpoint to Greenfield (chain mode) — durable
+   │     └── Checkpoint to the data store (chain mode) — durable
    └── (occasionally) ChainBackend.compute_state_root() →
                        BSCClient.update_state_root(token_id, hash)
                        log: "[WRITE][BSC] Anchor OK: agent=user-...
@@ -214,7 +200,7 @@ desktop fans out two parallel reads:
 
 - `GET /api/v1/agent/chain_status` — per-namespace 3-state status
   (`local` / `mirrored` / `anchored`) plus a chain-health card
-  (WAL queue, daemon alive, Greenfield + BSC readiness).
+  (BSC anchor readiness).
 - `GET /api/v1/agent/learning_summary?window=7d` — 7-day timeline
   + data-flow stage snapshot + just-learned feed.
 
@@ -225,10 +211,9 @@ EventLog window — no LLM calls, no chain traffic.
 
 After Stage 3 returns the reply, three things continue:
 
-1. **Greenfield PUTs** for the user_message + assistant_response events
-   are still in flight (write-behind). On the order of ~500ms each.
+1. **BSC anchors** (if scheduled) are still in flight.
 2. **Auto-compact** (if triggered): another LLM call producing a fresh
-   `memory_compact` event, writes to event_log + Greenfield + emits
+   `memory_compact` event, writes to event_log + emits
    `memory_compact` via on_event → twin_manager mirror writes
    `sync_events` row → `/agent/memories` next reads it.
 3. **Self-evolution** (every chat): MemoryEvolver / SkillEvolver run.
@@ -255,7 +240,6 @@ every few seconds) will pick up the resulting events as they land.
 | event_log append response | ~1ms |
 | HTTP response → desktop | ~10ms |
 | **Total visible latency** | **~1.5s** |
-| Background Greenfield PUTs (2x) | ~1s |
 | Background BSC anchor (if fires) | ~1.5s |
 
 ## What's NOT happening on each turn
@@ -264,7 +248,6 @@ every few seconds) will pick up the resulting events as they land.
 - Auto-compact — only every ~20 turns AND when log >30k chars.
 - Persona reflection — only every 10 turns.
 - Identity registration — only first time the user ever chats.
-- Greenfield bucket creation — only first time, then cached.
 
 ## File pointers (for grep)
 
@@ -274,7 +257,7 @@ every few seconds) will pick up the resulting events as they land.
 | Stage 2 (server route) | `packages/server/nexus_server/llm_gateway.py:llm_chat` |
 | Stage 2b (twin cold start) | `packages/server/nexus_server/twin_manager.py:_create_twin` |
 | Stage 3 (twin.chat 9 steps) | `packages/nexus/nexus/twin.py:chat` |
-| Step 2/7 (event_log + Greenfield) | `packages/sdk/nexus_core/memory/event_log.py`, `packages/sdk/nexus_core/backends/chain.py` |
+| Step 2/7 (event_log + storage) | `packages/sdk/nexus_core/memory/event_log.py`, `packages/sdk/nexus_core/backends/chain.py` |
 | Step 3 (memory projection) | `packages/nexus/nexus/evolution/projection.py`, `packages/sdk/nexus_core/memory/curated.py` |
 | Step 5 (post-check) | `packages/sdk/nexus_core/contracts/engine.py` |
 | Step 9 (evolution) | `packages/nexus/nexus/evolution/engine.py` |

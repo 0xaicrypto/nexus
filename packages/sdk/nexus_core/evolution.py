@@ -96,7 +96,7 @@ class EvolutionProposal:
     edit_id: str
     evolver: str                     # "MemoryEvolver" / "SkillEvolver" / etc.
     target_namespace: str            # "memory.facts" / "memory.persona" / "middleware.retry" / ...
-    target_version_pre: str          # Greenfield object key, e.g. "memory/facts/v0041.json"
+    target_version_pre: str          # object-store key, e.g. "memory/facts/v0041.json"
     target_version_post: str
 
     evidence_event_ids: list[int] = dataclasses.field(default_factory=list)

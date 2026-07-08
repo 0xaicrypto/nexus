@@ -303,18 +303,16 @@ class Keystore:
         self,
         agent_state_address: Optional[str] = None,
         task_manager_address: Optional[str] = None,
-        greenfield_bucket: str = "nexus-agent-state",
     ):
         """
         Create a StateManager pre-configured with this keystore's wallet.
 
         This connects the agent identity (ERC-8004) with the Rune state
-        layer (AgentStateExtension + TaskStateManager + Greenfield).
+        layer (AgentStateExtension + TaskStateManager).
 
         Args:
             agent_state_address: Deployed AgentStateExtension contract address.
             task_manager_address: Deployed TaskStateManager contract address.
-            greenfield_bucket: Greenfield bucket name for bulk storage.
 
         Returns:
             StateManager in chain mode, ready for on-chain operations.
@@ -348,7 +346,6 @@ class Keystore:
             agent_state_address=agent_state_address,
             task_manager_address=task_manager_address,
             identity_registry_address=id_addr,
-            greenfield_bucket=greenfield_bucket,
             network=network_key,
             mode="chain",
         )

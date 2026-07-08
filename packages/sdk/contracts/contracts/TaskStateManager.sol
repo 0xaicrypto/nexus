@@ -7,7 +7,7 @@ import "./IIdentityRegistry.sol";
  * @title TaskStateManager
  * @notice On-chain task lifecycle state machine for AI agents.
  *
- *         Tracks per-task: state_hash (→ Greenfield), version (optimistic concurrency),
+ *         Tracks per-task: state_hash (→ off-chain payload), version (optimistic concurrency),
  *         and status (pending/running/completed/failed).
  *
  *         Permission: Only the ERC-8004 NFT owner of the assigned agent can update tasks.
@@ -23,7 +23,7 @@ contract TaskStateManager {
 
     struct TaskRecord {
         uint256 agentId;     // FK to ERC-8004 tokenId
-        bytes32 stateHash;   // SHA-256 hash → Greenfield task payload
+        bytes32 stateHash;   // SHA-256 hash → off-chain task payload
         uint256 version;     // Monotonic counter for optimistic concurrency
         TaskStatus status;   // Current lifecycle state
         uint256 updatedAt;   // block.timestamp of last update
@@ -116,7 +116,7 @@ contract TaskStateManager {
      *      This prevents two runtimes from overwriting each other's state.
      *
      * @param taskId           Task to update
-     * @param stateHash        New SHA-256 hash of task payload on Greenfield
+     * @param stateHash        New SHA-256 hash of the off-chain task payload
      * @param status           New task status
      * @param expectedVersion  Must match current version (optimistic concurrency)
      */

@@ -3,8 +3,8 @@ Flush Policy & Write-Ahead Log — configurable write batching for Nexus.
 
 Three-layer write architecture:
   Layer 1 (Hot):  In-memory buffer + local WAL file    ← every event
-  Layer 2 (Warm): Greenfield upload                    ← batched every N events or T seconds
-  Layer 3 (Cold): BSC state_root anchor                ← batched with Greenfield, or on critical events
+  Layer 2 (Warm): object-store write                   ← batched every N events or T seconds
+  Layer 3 (Cold): BSC state_root anchor                ← batched with Layer 2, or on critical events
 
 The default FlushPolicy batches writes for performance. Users can override
 to sync every event (maximum safety) or flush only on explicit call
@@ -40,7 +40,7 @@ logger = logging.getLogger("nexus_core.flush")
 @dataclass
 class FlushPolicy:
     """
-    Controls when buffered state is flushed to Greenfield + BSC.
+    Controls when buffered state is flushed to storage + BSC.
 
     Attributes:
         every_n_events:       Flush after accumulating this many events.
@@ -68,7 +68,7 @@ class FlushPolicy:
 
     @classmethod
     def sync_every(cls) -> "FlushPolicy":
-        """Every event is written to Greenfield + BSC immediately.
+        """Every event is written to storage + BSC immediately.
 
         Maximum safety, highest gas cost, highest latency.
         Equivalent to the legacy (pre-batching) behavior.
@@ -103,7 +103,7 @@ class WriteAheadLog:
     Append-only local log for crash recovery.
 
     Each WAL file stores JSON-Lines: one event per line.
-    On flush, the WAL is truncated (events are now safely on Greenfield+BSC).
+    On flush, the WAL is truncated (events are now safely persisted + anchored).
     On crash recovery, the WAL is replayed from the last flush point.
 
     WAL files are stored at: {wal_dir}/{agent_id}.wal
@@ -174,7 +174,7 @@ class WriteAheadLog:
         a single predicate call.
 
         Use cases:
-          * Per-entry remove on Greenfield PUT success — keeps the
+          * Per-entry remove on successful persistence — keeps the
             WAL bounded during long sessions instead of growing
             forever (it used to only get cleared on close()/replay).
           * ``drop_session(session_id)`` for hard-delete: remove every
@@ -266,7 +266,7 @@ class FlushBuffer:
 
     Usage:
         def do_flush(events):
-            # Batch upload to Greenfield + anchor on BSC
+            # Batch write to storage + anchor on BSC
             ...
 
         buf = FlushBuffer(policy=FlushPolicy(), on_flush=do_flush)
@@ -403,7 +403,7 @@ class FlushBuffer:
             self._buffer.clear()
             self._last_flush_time = time.time()
 
-            # Truncate WAL — events are now safe on Greenfield+BSC
+            # Truncate WAL — events are now persisted + anchored
             if self._wal and self._policy.wal_enabled:
                 self._wal.truncate()
 

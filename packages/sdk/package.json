@@ -1,6 +1,0 @@
-{
-  "dependencies": {
-    "@bnb-chain/greenfield-js-sdk": "^2.2.2",
-    "ethers": "^5.7.2"
-  }
-}

@@ -209,7 +209,7 @@ def test_oversize_content_offloads_to_blob_with_hash_and_preview():
     em.emit("reasoning", "huge", content=big)
 
     md = log.rows[0]["metadata"]
-    assert md["content_storage"] == "greenfield_blob"
+    assert md["content_storage"] == "backend_blob"
     assert "raw_content" not in md, (
         "oversize content must NOT be inlined — that would defeat "
         "the chain WAL compaction guarantee"

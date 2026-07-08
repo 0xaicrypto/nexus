@@ -175,7 +175,7 @@ def _fold_attachments_into_messages(
             blocks.append(header)
             if len(att.content_text) > MAX_INLINE_TEXT_BYTES:
                 # Send the head only; the rest still rides through to the
-                # event log + Greenfield via the original Attachment object,
+                # event log via the original Attachment object,
                 # so durable copies are intact even when the LLM only sees
                 # a snippet.
                 head = att.content_text[:MAX_INLINE_TEXT_BYTES]
@@ -1834,7 +1834,7 @@ async def llm_chat(
         # cross-turn read no longer relies on the twin's in-memory
         # _file_reader cache, so we don't need to hand-stash here.
         # The /files/upload route already wrote the bytes to disk +
-        # Greenfield + emitted file_uploaded into the EventLog, and
+        # emitted file_uploaded into the EventLog, and
         # the SDK's ReadUploadedFileTool delegates to the SQL store
         # via the resolver wired up in twin_manager._create_twin.
 

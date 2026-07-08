@@ -102,7 +102,7 @@ class EvolutionEngine:
         # Load persona, skills, knowledge, AND memories in parallel.
         # Memory preloading is critical: without it, the first chat() call
         # triggers lazy-load inside get_context_for_query() which has a 3s
-        # timeout. Greenfield reads typically take 3-10s on cold start,
+        # timeout. Cold-start loads can exceed that,
         # causing the timeout to fire and memories to be unavailable.
         import asyncio
         results = await asyncio.gather(
@@ -303,7 +303,7 @@ class EvolutionEngine:
         """
         Build context for LLM from in-memory caches ONLY.
 
-        NEVER blocks on Greenfield/chain. All sources are checked with timeouts
+        NEVER blocks on storage/chain. All sources are checked with timeouts
         so chat() always returns fast. If evolution hasn't finished loading yet,
         context is simply empty — it will be available on the next turn.
 

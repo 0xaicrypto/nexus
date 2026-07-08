@@ -5,7 +5,7 @@ Startup flow:
   1. If chain mode (private_key provided):
      a. Connect to BSC via nexus_core.testnet() / nexus_core.mainnet()
      b. Register ERC-8004 identity (one-time, auto-detected)
-     c. All data persists to BSC + Greenfield
+     c. All data persists locally and anchors to BSC
   2. If local mode (no private_key):
      a. Use nexus_core.local()
      b. All data persists to local files
@@ -191,9 +191,6 @@ class DigitalTwin:
         agent_state_address: str = "",
         task_manager_address: str = "",
         identity_registry_address: str = "",
-        # Required in chain mode. Use ``nexus_core.bucket_for_agent``.
-        # No shared-bucket default — per-agent isolation is mandatory.
-        greenfield_bucket: str = "",
         # When the caller has already registered the agent on chain (e.g.
         # server's TwinManager runs ``bootstrap_chain_identity`` before
         # creating the twin), pass the assigned ERC-8004 token id here.
@@ -206,11 +203,6 @@ class DigitalTwin:
     ) -> "DigitalTwin":
         provider = LLMProvider(llm_provider)
         use_chain = bool(private_key)
-        if use_chain and not greenfield_bucket:
-            raise ValueError(
-                "DigitalTwin.create: chain mode requires greenfield_bucket. "
-                "Compute via nexus_core.bucket_for_agent(token_id)."
-            )
 
         config = TwinConfig(
             agent_id=agent_id,
@@ -227,7 +219,6 @@ class DigitalTwin:
             agent_state_address=agent_state_address,
             task_manager_address=task_manager_address,
             identity_registry_address=identity_registry_address,
-            greenfield_bucket=greenfield_bucket,
         )
 
         # ── Create Rune provider ──
@@ -241,14 +232,12 @@ class DigitalTwin:
                 chain_kwargs["task_manager_address"] = task_manager_address
             if identity_registry_address:
                 chain_kwargs["identity_registry_address"] = identity_registry_address
-            if greenfield_bucket:
-                chain_kwargs["greenfield_bucket"] = greenfield_bucket
 
             if "mainnet" in network:
                 rune = nexus_core.mainnet(private_key=private_key, **chain_kwargs)
             else:
                 rune = nexus_core.testnet(private_key=private_key, **chain_kwargs)
-            logger.info("Chain mode: BSC %s + Greenfield", network)
+            logger.info("Chain mode: BSC %s anchoring", network)
         else:
             rune = nexus_core.local(base_dir=base_dir)
             logger.info("Local mode: data stored in %s", base_dir)
@@ -331,8 +320,8 @@ class DigitalTwin:
 
         # ── Step 2: Initialize evolution engine (persona + skills + knowledge + memory) ──
         # Memory preloading is included in initialize() to avoid cold-start timeouts
-        # during the first chat() call. Greenfield reads can take 3-10s on cold start,
-        # so we give generous time here (10s). If it still times out, memories will
+        # during the first chat() call. Cold-start loads can be slow, so we give
+        # generous time here (10s). If it still times out, memories will
         # lazy-load on next access (slightly delayed first response).
         try:
             await asyncio.wait_for(self.evolution.initialize(), timeout=10.0)
@@ -354,7 +343,7 @@ class DigitalTwin:
                     self.evolution.skills._dirty = True
 
         # ── Step 3: Restore last session ──
-        # Try loading from cache (instant). If Greenfield is slow, start fresh
+        # Try loading from cache (instant). If the backend is slow, start fresh
         # and recover old session knowledge in background.
         session_restored = False
         try:
@@ -362,7 +351,7 @@ class DigitalTwin:
                 self.rune.sessions.list_checkpoints(
                     agent_id=self.config.agent_id, limit=1,
                 ),
-                timeout=10.0,  # generous: daemon startup + Greenfield read
+                timeout=10.0,  # generous: cold-start backend read
             )
         except asyncio.TimeoutError:
             logger.info("Session restore timed out (10s) — starting fresh, recovering in background")
@@ -449,16 +438,7 @@ class DigitalTwin:
             thresholds=None,  # use BEP-Nexus defaults
         )
 
-        # Phase Q audit fix #5: kick off the chain backend's daemon
-        # health watchdog so a dead Greenfield daemon surfaces in
-        # /sync_status (and the desktop's cognition panel) within
-        # ~30s, not only on the next chat turn that tries to write.
         backend = getattr(self.rune, "_backend", None)
-        if backend is not None and hasattr(backend, "start_watchdog"):
-            try:
-                backend.start_watchdog()
-            except Exception as e:
-                logger.debug("ChainBackend watchdog start failed: %s", e)
 
         # Phase A2: hook the ThinkingEmitter to the EventLog (and
         # ChainBackend's blob writer when chain mode is active) so
@@ -495,7 +475,7 @@ class DigitalTwin:
                 if restored:
                     logger.info(
                         "Chain recovery: restored %d events from "
-                        "Greenfield snapshot",
+                        "backend snapshot",
                         restored,
                     )
             except Exception as e:  # noqa: BLE001
@@ -848,13 +828,13 @@ class DigitalTwin:
 
     async def _recover_old_session(self) -> None:
         """
-        Background: load old session from Greenfield and extract memories.
+        Background: load old session from the backend and extract memories.
 
         Does NOT overwrite current _messages — the user is already chatting
         in a new session. Instead, feeds old messages to the evolution engine
         so the knowledge isn't lost.
 
-        Total timeout: 60s (if Greenfield is completely down, don't block forever).
+        Total timeout: 60s (if the backend is completely stuck, don't block forever).
         """
         try:
             # list_checkpoints is in-memory only, but the data might need
@@ -891,7 +871,7 @@ class DigitalTwin:
                 self._emit("memory_stored", {
                     "count": len(old_messages),
                     "items": [f"Recovered from previous session ({old.thread_id})"],
-                    "storage": "Greenfield + BSC" if self.config.use_chain else "local",
+                    "storage": "chain" if self.config.use_chain else "local",
                 })
             except asyncio.TimeoutError:
                 logger.warning("Memory extraction from recovered session timed out")
@@ -928,7 +908,7 @@ class DigitalTwin:
 
         if self.config.use_chain:
             parts.append(f"- Network: BNB Chain ({self.config.network})")
-            parts.append(f"- Storage: BNB Greenfield (bucket: {self.config.greenfield_bucket})")
+            parts.append("- Storage: local data store, state roots anchored on BSC")
 
             if self._erc8004_agent_id is not None:
                 parts.append(f"- ERC-8004 Token ID: {self._erc8004_agent_id}")
@@ -1584,7 +1564,7 @@ class DigitalTwin:
     async def _auto_compact(self) -> None:
         """Background: delegate to SDK's EventLogCompactor.
 
-        Compact result is appended to EventLog (syncs to Greenfield)
+        Compact result is appended to EventLog (persisted + snapshotted)
         and updates local CuratedMemory (derived view).
 
         We surface the curated snapshot text in the emit's ``content``
@@ -1658,7 +1638,7 @@ class DigitalTwin:
         memories from that turn were permanently lost. By extracting first, we
         ensure memories are stored before the session checkpoint references them.
         """
-        storage = "Greenfield + BSC" if self.config.use_chain else "local"
+        storage = "chain" if self.config.use_chain else "local"
 
         # ── 1. Extract and store memories FIRST ──
         self._emit("memory_extract", {"turn": self._turn_count})
@@ -1852,7 +1832,7 @@ class DigitalTwin:
         Cleanup matrix:
           * EventLog (local SQLite) — rows for this session_id are
             DROPPED (irreversible).
-          * Greenfield objects (if chain mode) — best-effort delete of
+          * Backend objects (if chain mode) — best-effort delete of
             objects under ``agents/{user}/.../sessions/{session_id}/``.
             Failures here don't abort the whole delete; the object
             store is treated as cache.
@@ -1906,7 +1886,7 @@ class DigitalTwin:
                 "EventLog.delete_session failed for %s: %s", session_id, e,
             )
 
-        # Best-effort Greenfield cleanup. ChainBackend exposes
+        # Best-effort backend object cleanup. ChainBackend exposes
         # ``delete_session_objects`` when chain mode is active; in
         # local mode there's nothing to clean up.
         gf_result: dict = {"attempted": False}
@@ -1917,7 +1897,7 @@ class DigitalTwin:
                 gf_result["attempted"] = True
             except Exception as e:
                 logger.warning(
-                    "Greenfield cleanup failed for session %s: %s",
+                    "Backend object cleanup failed for session %s: %s",
                     session_id, e,
                 )
                 gf_result = {"attempted": True, "error": str(e)}
@@ -1938,7 +1918,7 @@ class DigitalTwin:
             "session_id": session_id,
             "deleted_event_count": deleted,
             "audit_event_recorded": True,
-            "greenfield": gf_result,
+            "storage": gf_result,
             "bsc_anchors_immutable_note": (
                 "Existing BSC state-root anchors are immutable on chain "
                 "and cannot be deleted. The deletion event is itself "
@@ -1986,7 +1966,7 @@ class DigitalTwin:
             feedback=feedback,
         )
         if learning:
-            storage = "Greenfield + BSC" if self.config.use_chain else "local"
+            storage = "chain" if self.config.use_chain else "local"
             self._emit("skill_learned", {
                 "skill": learning.get("skill_name", "unknown"),
                 "lesson": learning.get("lesson", ""),
@@ -2058,12 +2038,12 @@ class DigitalTwin:
             logger.debug("Session save during shutdown: %s", e)
 
         # ── 2. Wait for background tasks (memory extraction, session sync) ──
-        # The _post_response_work tasks fire Greenfield writes inside them,
+        # The _post_response_work tasks fire backend writes inside them,
         # so we need to wait for those to complete first, then let
         # ChainBackend.close() drain its own pending write queue.
         if hasattr(self, "_bg_tasks") and self._bg_tasks:
             n = len(self._bg_tasks)
-            grace = 15.0  # generous: post-turn work + Greenfield PUT latency
+            grace = 15.0  # generous: post-turn work latency
             self._emit("shutdown_sync", {
                 "pending": n,
                 "grace_seconds": grace,
@@ -2094,7 +2074,7 @@ class DigitalTwin:
             self._bg_tasks.clear()
 
         # ── 3. Close Rune provider (drains ChainBackend pending writes) ──
-        # ChainBackend.close() has its own grace period for Greenfield writes
+        # ChainBackend.close() has its own grace period for background tasks
         # that were fired by the tasks we just waited for.
         try:
             await self.rune.close()

@@ -77,10 +77,9 @@ Storage is on disk per agent at
 `{base_dir}/event_log/{agent_id}.db`. Read APIs: `recent(limit, session_id)`,
 `search(query)`, `count()`, `get_trajectory(session_id)`.
 
-In chain mode, every `event_log.append(...)` triggers a Greenfield PUT
-via `ChainBackend._greenfield_write_behind` — durable copy to the agent's
-own bucket. A WAL provides crash safety: cancelled writes are replayed
-on next startup.
+In chain mode, every `event_log.append(...)` is persisted through
+`ChainBackend.store_json` — a synchronous write to the backend's
+durable local store.
 
 ### EventLogCompactor (`memory/compactor.py`)
 
@@ -141,7 +140,7 @@ turn — explicit recall ≠ background compact.
 
 ## The on-chain anchor
 
-Every event_log append in chain mode → Greenfield PUT (durable).
+Every event_log append in chain mode → durable data-store write.
 Periodically the agent's ChainBackend computes a content hash over
 recent state and calls `AgentStateExtension.updateStateRoot(token_id,
 hash)` on BSC. A third party with read access to the bucket can

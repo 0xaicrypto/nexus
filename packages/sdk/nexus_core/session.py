@@ -4,11 +4,11 @@ BNBChainSessionService — ADK-compatible SessionService backed by on-chain stat
 Contract interactions:
   - ERC-8004 Identity Registry: read agent ownership (verify agentId exists)
   - AgentStateExtension.sol:    read/write state_root hash (our contract)
-  - Greenfield / IPFS:          read/write full session payloads
+  - Object store:               read/write full session payloads
 
 Write architecture (configurable via FlushPolicy):
   Layer 1 (Hot):  In-memory session + local WAL       ← every event
-  Layer 2 (Warm): Greenfield payload upload            ← batched
+  Layer 2 (Warm): object-store payload write           ← batched
   Layer 3 (Cold): BSC updateStateRoot                  ← batched with Layer 2
 
 Default: batch 5 events or 30 seconds, sync on session close.
@@ -40,12 +40,12 @@ class BNBChainSessionService(BaseSessionService):
     Flow for each event (with default batching):
       1. Append event to in-memory session + WAL (instant)
       2. When flush triggers (N events / T seconds / explicit):
-         a. Serialize session → JSON → Greenfield → content_hash
+         a. Serialize session → JSON → object store → content_hash
          b. Update state_root on BSC (content_hash)
          c. Truncate WAL
 
     On crash recovery:
-      1. Load last committed session from Greenfield (via BSC state_root)
+      1. Load last committed session from the object store (via BSC state_root)
       2. Replay WAL entries on top → restored to pre-crash state
       3. At most N-1 events may need replay (where N = every_n_events)
     """
@@ -109,7 +109,7 @@ class BNBChainSessionService(BaseSessionService):
         return self._buffers[session.id]
 
     def _flush_session(self, session: Session) -> None:
-        """Write the full session to Greenfield + update BSC state_root."""
+        """Write the full session to the object store + update BSC state_root."""
         session_data = self._serialize_session(session)
 
         # Structured path: rune/agents/{agentAddress}/sessions/{sessionId}/{hash}.json
@@ -117,7 +117,7 @@ class BNBChainSessionService(BaseSessionService):
         folder = self._state.agent_folder(session.app_name)
         data_bytes = json.dumps(session_data, default=str, sort_keys=True).encode("utf-8")
         chash = hashlib.sha256(data_bytes).hexdigest()
-        obj_path = StateManager.greenfield_path(
+        obj_path = StateManager.storage_path(
             folder, "sessions", chash, sub_key=session.id,
         )
         # Use store_data (not store_json) to avoid re-serialization —
@@ -139,7 +139,7 @@ class BNBChainSessionService(BaseSessionService):
 
     def flush(self, session_id: Optional[str] = None) -> int:
         """
-        Explicitly flush buffered events to Greenfield + BSC.
+        Explicitly flush buffered events to the object store + BSC.
 
         Args:
             session_id: Flush a specific session.  If None, flush all sessions.
@@ -189,7 +189,7 @@ class BNBChainSessionService(BaseSessionService):
         payload = {"sessions": index, "updated_at": time.time()}
         data_bytes = json.dumps(payload, default=str, sort_keys=True).encode("utf-8")
         chash = hashlib.sha256(data_bytes).hexdigest()
-        obj_path = StateManager.greenfield_path(folder, "state", chash)
+        obj_path = StateManager.storage_path(folder, "state", chash)
         content_hash = self._state.store_data(data_bytes, object_path=obj_path)
         self._state.update_state_root(app_name, content_hash, self._runtime_id)
 
@@ -260,7 +260,7 @@ class BNBChainSessionService(BaseSessionService):
         folder = self._state.agent_folder(app_name)
         data_bytes = json.dumps(session_data, default=str, sort_keys=True).encode("utf-8")
         init_hash = hashlib.sha256(data_bytes).hexdigest()
-        init_path = StateManager.greenfield_path(
+        init_path = StateManager.storage_path(
             folder, "sessions", init_hash, sub_key=session_id,
         )
         content_hash = self._state.store_data(data_bytes, object_path=init_path)
@@ -403,10 +403,10 @@ class BNBChainSessionService(BaseSessionService):
 
         With batching (default):
           - Event is added to in-memory session + WAL immediately
-          - Greenfield + BSC write is deferred until flush triggers
+          - Object-store + BSC write is deferred until flush triggers
 
         With sync_every policy:
-          - Every event is written to Greenfield + BSC immediately
+          - Every event is written to the object store + BSC immediately
           - Equivalent to legacy behavior
         """
         # Let the base class handle state updates

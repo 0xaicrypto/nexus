@@ -205,7 +205,7 @@ echo "→ wrote Info.plist"
 # Layout inside the .app:
 #   Nexus.app/Contents/Resources/backend-source/
 #     packages/
-#       sdk/         ← nexus_core (Python) + greenfield_daemon (Node)
+#       sdk/         ← nexus_core (Python)
 #       nexus/       ← nexus framework (Python)
 #       server/      ← nexus_server (Python)
 #       desktop/scripts/local-backend/  ← setup.sh, start.sh, stop.sh
@@ -252,15 +252,6 @@ cp scripts/local-backend/*.sh \
    "$BACKEND_DIR/packages/desktop/scripts/local-backend/"
 chmod +x "$BACKEND_DIR/packages/desktop/scripts/local-backend/"*.sh
 echo "  bundling packages/desktop/scripts/local-backend"
-
-# Pre-run npm install in the bundled sdk so the greenfield daemon has
-# its node_modules without requiring the user's machine to have
-# internet at first-launch. We use --omit=dev so we skip test deps.
-if command -v npm >/dev/null && [ -f "$BACKEND_DIR/packages/sdk/package.json" ]; then
-    echo "  npm install (greenfield daemon deps)"
-    ( cd "$BACKEND_DIR/packages/sdk" && npm install --omit=dev --silent ) \
-        || echo "  ⚠ npm install failed — user's machine will need to re-run it via setup.sh"
-fi
 
 # Stamp the build version inside the bundled backend so the Python
 # server can log it on startup. Lives at
@@ -402,7 +393,7 @@ First-time setup
 ----------------
 
 On first launch, the app sets up a local agent backend
-(Python venv + Greenfield daemon). This takes 1–3 minutes the
+(Python venv). This takes 1–3 minutes the
 very first time — you'll see "Setting up Nexus" with a progress
 log. Subsequent launches are 2–5 seconds.
 

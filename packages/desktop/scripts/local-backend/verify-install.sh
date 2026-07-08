@@ -109,11 +109,8 @@ if [[ -f "$RUNE_HOME/runtime.json" ]]; then
     bad "server pid $SERVER_PID not alive"
   fi
 
-  if [[ -n "$DAEMON_PID" ]] && [[ "$DAEMON_PID" != "None" ]] && [[ "$DAEMON_PID" != "null" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
-    ok "greenfield daemon pid $DAEMON_PID alive"
-  else
-    note "greenfield daemon not running (chain features will be limited)"
-  fi
+  # Helper daemon was removed along with the decentralised
+  # object-storage data plane — daemon_pid stays null by design.
 else
   bad "runtime.json missing — Nexus.app not started or backend failed to boot"
   PORT=""; SERVER_PID=""; DAEMON_PID=""

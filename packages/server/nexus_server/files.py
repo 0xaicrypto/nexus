@@ -6,20 +6,17 @@
 The desktop streams attachments here; chat then references them by
 ``file_id`` rather than re-encoding base64 in every request.
 
-Storage model — three layers, no in-memory state:
+Storage model — no in-memory state:
 
-  Layer 1 (canonical, immutable):
-      Greenfield bytes at ``files/<file_id>/<safe_name>`` inside
-      the user's per-agent bucket, written via twin's ChainBackend
-      on upload. The matching ``file_uploaded`` event lands in
-      twin.event_log and participates in the next BSC state-root
-      anchor — making the upload survive server replacement /
-      database wipes / migration.
+  Layer 1 (metadata, durable):
+      A ``file_uploaded`` event lands in twin.event_log on upload
+      and participates in the next BSC state-root anchor, making
+      the upload's metadata (name, sha256, size) verifiable.
 
-  Layer 2 (server cache, regenerable):
-      ``uploads`` SQLite row (file_id, sha256, gnfd_path,
-      extracted_text) + bytes on local disk. Fast path; rebuilt
-      from Layer 1 if lost.
+  Layer 2 (server storage):
+      ``uploads`` SQLite row (file_id, sha256, extracted_text)
+      + bytes on local disk. An S3-compatible object mirror will
+      complement this in a future task.
 
   Layer 3 (tool surface, stateless):
       ``ReadUploadedFileTool`` calls ``resolve_file_text`` below.
@@ -93,7 +90,7 @@ def format_size_hint(size_bytes: int) -> str:
 
 
 def _files_dir() -> Path:
-    """Where uploads live before twin/Greenfield consumes them."""
+    """Where uploads live before the twin consumes them."""
     base = Path(getattr(config, "UPLOAD_DIR",
                         Path.home() / ".nexus_server" / "uploads"))
     base.mkdir(parents=True, exist_ok=True)
@@ -103,15 +100,14 @@ def _files_dir() -> Path:
 def _ensure_uploads_table() -> None:
     """Lazy table create — keeps database.py focused on core schema.
 
-    Schema evolution (live three-layer file storage):
+    Schema evolution (live file storage):
       v1: file_id, user_id, name, mime, size_bytes, disk_path, created_at
       v2: + sha256, gnfd_path, extracted_text
-          - sha256: content hash, also the Greenfield key suffix
-          - gnfd_path: gnfd://<bucket>/files/<file_id>/<name> — the
-            Greenfield object path the ChainBackend wrote to. Set on
-            successful Greenfield mirror; ``""`` until then. The disk
-            copy under disk_path remains the fast path — gnfd_path is
-            the recovery path after disk loss / cross-server hop.
+          - sha256: content hash of the uploaded bytes
+          - gnfd_path: LEGACY column from the removed decentralised
+            object-storage mirror. Kept in the schema so existing
+            databases don't need a migration; always ``""`` for new
+            rows and never read.
           - extracted_text: cached plain-text projection so
             read_uploaded_file doesn't have to re-decode PDFs / DOCX
             on every cross-turn read. Lazy: filled on first read,
@@ -325,9 +321,9 @@ async def delete_file(
     file_id: str,
     current_user: str = Depends(get_current_user),
 ):
-    """Remove a file: SQL row + on-disk copy + (best-effort) Greenfield
-    object. Curated memory entries that mention the file are left in
-    place — they're historical record, not actionable references."""
+    """Remove a file: SQL row + on-disk copy. Curated memory entries
+    that mention the file are left in place — they're historical
+    record, not actionable references."""
     _ensure_uploads_table()
     with get_db_connection() as conn:
         row = conn.execute(
@@ -449,23 +445,19 @@ async def upload_file(
     patient_hash: str = Form(""),
     current_user: str = Depends(get_current_user),
 ) -> UploadResponse:
-    """Receive a multipart upload, persist it across all three layers
-    of the file-storage model, and return its addressable file_id.
+    """Receive a multipart upload, persist it across the layers of
+    the file-storage model, and return its addressable file_id.
 
-    Layer 1 (canonical, immutable): bytes mirrored to the user's
-    Greenfield bucket via twin's ChainBackend; an ``file_uploaded``
-    event lands in twin.event_log so the metadata
-    (file_id + sha256 + gnfd_path + name + mime + size) participates
-    in the next state-root anchor on BSC. After a server crash /
-    migration the file is recoverable from this layer alone.
+    Layer 1 (metadata, durable): a ``file_uploaded`` event lands in
+    twin.event_log so the metadata (file_id + sha256 + name + mime +
+    size) participates in the next state-root anchor on BSC.
 
-    Layer 2 (fast cache, regenerable): bytes also kept on local disk
-    under ``UPLOAD_DIR/<user>/`` and indexed by the ``uploads`` SQLite
+    Layer 2 (server storage): bytes kept on local disk under
+    ``UPLOAD_DIR/<user>/`` and indexed by the ``uploads`` SQLite
     table. ``read_uploaded_file`` always tries this layer first.
 
     Layer 3 (tool surface, stateless): the SDK
-    ``ReadUploadedFileTool`` queries Layer 2 by user_id + name; on
-    miss falls back to Layer 1 via Greenfield + the EventLog. This
+    ``ReadUploadedFileTool`` queries Layer 2 by user_id + name. This
     means twin instance lifecycle (idle eviction, cold restart) no
     longer affects file recall — the previous in-memory ``_file_reader``
     cache was the source of the cross-turn file-not-found bug.
@@ -568,69 +560,16 @@ async def upload_file(
         )
     sha256 = hasher.hexdigest()
 
-    # Layer 1 mirror still wants the bytes (small files only — Greenfield
-    # write-behind path expects raw). For the big-file path it'll skip
-    # because skip_greenfield is True (#134). Read back from disk only
-    # when we actually need raw bytes for that mirror.
-    raw = b""  # populated below only when Greenfield mirror is enabled
-
-    # ── Layer 1 mirror: Greenfield + EventLog → BSC anchor ────────
-    # Best-effort. If the user's twin or chain backend isn't ready
-    # (fresh signup pre-registration, local-mode dev), we still
-    # accept the upload — Layer 2 (disk + SQL) is enough for chat
-    # to work. ``gnfd_path`` stays empty until a future re-mirror
-    # opportunity.
-    #
-    # #134: when NEXUS_GREENFIELD_DISABLED is set (default), skip the
-    # Greenfield mirror entirely. Disk + SQL is the durability layer;
-    # a traditional S3-compatible backend will replace the Greenfield
-    # mirror in a follow-up task. ``gnfd_path`` stays "" so existing
-    # readers (which already treat empty as "no mirror") keep working.
-    gnfd_path = ""
-    skip_greenfield = getattr(config, "NEXUS_GREENFIELD_DISABLED", True)
+    # ── Layer 1: EventLog → BSC anchor ─────────────────────────────
+    # Best-effort. If the user's twin isn't ready (fresh signup
+    # pre-registration, local-mode dev), we still accept the upload —
+    # Layer 2 (disk + SQL) is enough for chat to work.
+    gnfd_path = ""  # legacy column value — kept "" for schema compat
     try:
         from nexus_server.twin_manager import get_twin
         twin = await get_twin(current_user)
-        # Path convention: files/<file_id>/<safe_name>. Bucket is
-        # injected by ChainBackend so a per-agent bucket layout
-        # (nexus-agent-{token_id}) Just Works.
-        if not skip_greenfield:
-            gnfd_path = f"files/{file_id}/{_safe_name(name)}"
-            backend = getattr(twin, "rune", None)
-            backend = getattr(backend, "_backend", None) if backend else None
-            if backend is not None and hasattr(backend, "store_blob"):
-                # Read disk back to memory only when we actually need
-                # the bytes for the Greenfield mirror. Streaming kept
-                # them off RAM during upload; reading back here is
-                # bounded to ~MAX_FILE_BYTES (with the caveat that
-                # Greenfield write-behind itself won't comfortably
-                # handle multi-GB blobs — this whole branch is
-                # disabled by default via #134 anyway).
-                try:
-                    raw = disk_path.read_bytes()
-                except OSError as e:
-                    logger.warning(
-                        "Greenfield mirror read-back failed: %s", e,
-                    )
-                    raw = b""
-                try:
-                    if raw:
-                        await backend.store_blob(gnfd_path, raw)
-                    else:
-                        gnfd_path = ""
-                except Exception as e:  # noqa: BLE001
-                    # store_blob is async write-behind; failures here are
-                    # rare and only mean the local cache succeeded.
-                    logger.warning(
-                        "Greenfield mirror failed for %s: %s — disk + SQL "
-                        "still serve chat, file recovery limited.",
-                        name, e,
-                    )
-                    gnfd_path = ""
-        # Emit the file_uploaded event regardless — Layer 1 anchor
-        # records the metadata even if the Greenfield blob write
-        # didn't land. The recovery path can re-fetch from disk OR
-        # re-upload to Greenfield on next reference.
+        # Emit the file_uploaded event so the metadata participates
+        # in the next state-root anchor.
         try:
             twin.event_log.append(
                 "file_uploaded",
@@ -641,7 +580,6 @@ async def upload_file(
                     "mime": mime,
                     "size_bytes": total,
                     "sha256": sha256,
-                    "gnfd_path": gnfd_path,
                 },
             )
         except Exception as e:  # noqa: BLE001
@@ -789,9 +727,8 @@ async def upload_file(
         conn.commit()
 
     logger.info(
-        "Uploaded file %s (%s, %d bytes, sha256=%s, gnfd=%s) for user %s",
-        name, mime, total, sha256[:12],
-        gnfd_path or "(skipped)", current_user,
+        "Uploaded file %s (%s, %d bytes, sha256=%s) for user %s",
+        name, mime, total, sha256[:12], current_user,
     )
 
     # Memory Fix B: append a curated memory entry so the file persists
@@ -1472,7 +1409,7 @@ def resolve_files(user_id: str, file_ids: list[str]) -> list[dict]:
         # #160 — if the upload had a Gemini-incompatible format and the
         # normalizer produced a JPEG copy, transparently swap the
         # downstream view to point at the normalized file. The
-        # original on disk + greenfield mirror keep the lossless
+        # original on disk keeps the lossless
         # source; only the chat-time multimodal path sees the JPEG.
         effective_mime = mime
         effective_disk = disk_path
@@ -1518,7 +1455,7 @@ def read_file_bytes(disk_path: str) -> Optional[bytes]:
 async def resolve_file_text(
     user_id: str, name: str,
 ) -> Optional[tuple[str, str]]:
-    """Three-layer fallback resolution for ``read_uploaded_file``.
+    """Layered fallback resolution for ``read_uploaded_file``.
 
     Returns ``(filename, full_text)`` on hit; ``None`` if the file
     isn't reachable through any layer.
@@ -1530,20 +1467,9 @@ async def resolve_file_text(
          ``UPLOAD_DIR``. Run the SDK distiller's text extractor and
          write the result back to ``extracted_text`` so future
          turns are O(1) again.
-      3. **Greenfield → extract** — disk gone (server migration,
-         crash + missing volume). Pull bytes from the
-         agent's Greenfield bucket via ChainBackend.load_blob; if
-         that hits, repopulate the disk copy AND extracted_text so
-         we degrade gracefully back to layer 2 for subsequent
-         reads.
-      4. **EventLog recovery** — last resort. If the SQL row is
-         gone too (e.g. the SQLite was reset but EventLog +
-         Greenfield remain), scan recent ``file_uploaded`` events
-         for one whose ``metadata.name`` matches; that gives us
-         file_id + gnfd_path and we re-fetch.
 
-    All layers are best-effort and isolated — a Greenfield outage
-    can't make the SQL fast path stop working.
+    All layers are best-effort and isolated — a disk problem can't
+    make the SQL fast path stop working.
     """
     _ensure_uploads_table()
 
@@ -1582,16 +1508,13 @@ async def resolve_file_text(
             if rs is not None:
                 row = rs
 
-    # Layer 4 (recovery via EventLog) — handled separately below if
-    # row is still None.
     if row is None:
-        return await _recover_via_event_log(user_id, name)
+        return None
 
     file_id = row[0]
     real_name = row[1]
     mime = row[2]
     disk_path = row[4]
-    gnfd_path = row[6] or ""
     cached_text = row[7] or ""
 
     # Layer 1 hit: cached extracted_text.
@@ -1603,15 +1526,6 @@ async def resolve_file_text(
     if text:
         _save_extracted_text(file_id, text)
         return real_name, text
-
-    # Layer 3: pull from Greenfield → re-hydrate disk + cache.
-    if gnfd_path:
-        text = await _extract_from_greenfield(
-            user_id, gnfd_path, real_name, mime, disk_path,
-        )
-        if text:
-            _save_extracted_text(file_id, text)
-            return real_name, text
 
     return None
 
@@ -1647,36 +1561,6 @@ async def _extract_from_disk(
     return _bytes_to_text(raw, name, mime)
 
 
-async def _extract_from_greenfield(
-    user_id: str, gnfd_path: str, name: str, mime: str,
-    restore_to_disk_path: str,
-) -> Optional[str]:
-    try:
-        from nexus_server.twin_manager import get_twin
-        twin = await get_twin(user_id)
-        backend = getattr(twin, "rune", None)
-        backend = getattr(backend, "_backend", None) if backend else None
-        if backend is None or not hasattr(backend, "load_blob"):
-            return None
-        raw = await backend.load_blob(gnfd_path)
-        if not raw:
-            return None
-    except Exception as e:  # noqa: BLE001
-        logger.debug("greenfield load_blob(%s) failed: %s", gnfd_path, e)
-        return None
-
-    # Best-effort: rehydrate the local disk copy so layer 2 picks it
-    # up next time. A failure here doesn't block the read.
-    try:
-        p = Path(restore_to_disk_path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(raw)
-    except Exception:
-        pass
-
-    return _bytes_to_text(raw, name, mime)
-
-
 def _bytes_to_text(
     raw: bytes, name: str, mime: str,
 ) -> Optional[str]:
@@ -1690,72 +1574,6 @@ def _bytes_to_text(
     except Exception as e:  # noqa: BLE001
         logger.debug("extract_text(%s) failed: %s", name, e)
         return None
-
-
-async def _recover_via_event_log(
-    user_id: str, name: str,
-) -> Optional[tuple[str, str]]:
-    """Layer 4 recovery: find a ``file_uploaded`` event whose
-    metadata.name matches and rebuild the SQL row from it. Useful
-    when the server migrated to a fresh SQLite but the user's
-    EventLog + Greenfield bucket carry over.
-    """
-    try:
-        from nexus_server.twin_manager import get_twin
-        twin = await get_twin(user_id)
-        events = list(twin.event_log.recent(limit=200))
-    except Exception:
-        return None
-
-    # Newest matching upload first.
-    match = None
-    for e in reversed(events):
-        if getattr(e, "event_type", "") != "file_uploaded":
-            continue
-        md = getattr(e, "metadata", None) or {}
-        if md.get("name") == name or (
-            isinstance(md.get("name"), str) and name.lower() in md["name"].lower()
-        ):
-            match = md
-            break
-    if match is None or not match.get("gnfd_path"):
-        return None
-
-    gnfd_path = match["gnfd_path"]
-    file_id = match.get("file_id") or uuid.uuid4().hex
-    real_name = match.get("name") or name
-    mime = match.get("mime") or "application/octet-stream"
-
-    # Re-fetch from Greenfield, repopulate disk + SQL.
-    user_dir = _files_dir() / user_id
-    user_dir.mkdir(parents=True, exist_ok=True)
-    disk_path = user_dir / f"{file_id}-{_safe_name(real_name)}"
-    text = await _extract_from_greenfield(
-        user_id, gnfd_path, real_name, mime, str(disk_path),
-    )
-    if not text:
-        return None
-
-    # Best-effort SQL rehydrate so subsequent reads hit Layer 1.
-    try:
-        with get_db_connection() as conn:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO uploads
-                (file_id, user_id, name, mime, size_bytes, disk_path,
-                 created_at, sha256, gnfd_path, extracted_text)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (file_id, user_id, real_name, mime,
-                 int(match.get("size_bytes") or 0), str(disk_path),
-                 now_iso, match.get("sha256") or "", gnfd_path, text),
-            )
-            conn.commit()
-    except Exception as e:  # noqa: BLE001
-        logger.debug("recovery rehydrate failed: %s", e)
-
-    return real_name, text
 
 
 def list_user_files(user_id: str) -> dict[str, int]:

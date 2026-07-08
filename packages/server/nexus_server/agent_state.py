@@ -132,7 +132,7 @@ class AgentStateSnapshot(BaseModel):
         new users after S4 retired the /sync/push enqueue path)
       - new ``twin_chain_events`` rows (post-S4, written by the chain
         activity log handler in :mod:`twin_manager` whenever twin's
-        ChainBackend commits a BSC anchor or attempts a Greenfield PUT)
+        ChainBackend commits a BSC anchor)
 
     For chat-mode users today the meaningful signal lives in
     twin_chain_events; sync_anchors is only relevant for users whose
@@ -241,8 +241,8 @@ def _build_timeline(user_id: str, limit: int) -> list[TimelineItem]:
 
     # Twin chain events (post-S4 — captured by the logging handler in
     # twin_manager). Surface every entry so the user can see both
-    # successful BSC anchors AND Greenfield PUT failures right in the
-    # activity feed instead of having to dig through server logs.
+    # successful AND failed BSC anchors right in the activity feed
+    # instead of having to dig through server logs.
     with get_db_connection() as conn:
         twin_rows = conn.execute(
             """
@@ -265,13 +265,9 @@ def _build_timeline(user_id: str, limit: int) -> list[TimelineItem]:
         elif kind == "bsc_anchor" and status == "failed":
             kind_str = "anchor.failed"
             display = f"✕ BSC anchor failed: {(err or '')[:120]}"
-        elif kind == "greenfield_put" and status == "ok":
-            kind_str = "greenfield.put_ok"
-            display = f"💾 Greenfield PUT {opath or ''}"
-        elif kind == "greenfield_put" and status == "failed":
-            kind_str = "greenfield.put_failed"
-            display = f"✕ Greenfield PUT failed: {(err or '')[:120]}"
         else:
+            # Legacy kinds (rows written before the object-storage
+            # mirror was removed) fall through to a generic rendering.
             kind_str = f"chain.{kind}.{status}"
             display = summary or f"{kind} {status}"
         items.append(TimelineItem(
@@ -338,9 +334,9 @@ def _anchor_status_counts(user_id: str) -> dict[str, int]:
 def _twin_chain_event_counts(user_id: str) -> dict[str, int]:
     """Bug 3: counts of chain writes captured from twin's ChainBackend.
 
-    Returns ``{"bsc_anchor_ok", "bsc_anchor_failed", "greenfield_ok",
-    "greenfield_failed"}`` keys, each an int. Empty/zero for users
-    whose twin hasn't written anything yet.
+    Returns ``{"bsc_anchor_ok", "bsc_anchor_failed", ...}`` keys
+    (``{kind}_{status}``), each an int. Empty/zero for users whose
+    twin hasn't written anything yet.
     """
     with get_db_connection() as conn:
         rows = conn.execute(
@@ -433,7 +429,6 @@ async def get_agent_state(
         legacy.get("failed", 0)
         + legacy.get("failed_permanent", 0)
         + twin_counts.get("bsc_anchor_failed", 0)
-        + twin_counts.get("greenfield_put_failed", 0)
     )
     total = (
         sum(legacy.values())
@@ -561,84 +556,34 @@ class NamespacesResponse(BaseModel):
 
 
 class SyncStatus(BaseModel):
-    """Per-path sync state + bucket health.
+    """Per-path sync state.
 
-    Driven by the chain backend's WAL + GreenfieldClient state. The
-    desktop uses this to badge each Workdir file:
-      * NOT in pending_paths AND bucket_created → ✅ synced
-      * IN pending_paths or bucket NOT created → ⏳ pending / local-only
+    The chain backend's data plane writes synchronously to its local
+    store, so there is never a pending write queue any more. The
+    shape is kept (empty) for client compatibility; the fields will
+    become meaningful again when the S3-compatible mirror lands.
     """
     pending_paths: list[str]
     wal_entry_count: int
-    bucket: str
-    # Has the SP confirmed the agent's bucket exists? When False,
-    # EVERY put has fallen back to local — none of the files in the
-    # workdir have actually landed on Greenfield. The desktop shows
-    # a prominent warning in this case.
-    bucket_created: bool = False
-    bucket_status_detail: str = ""
-    # Phase Q audit fix #4: surface background write failures so the
-    # cognition panel can show "N writes failed since startup" instead
-    # of users only finding out via server logs.
-    write_failure_count: int = 0
-    last_write_error: Optional[dict] = None
-    # Phase Q audit fix #5: daemon liveness — the watchdog flips
-    # this False within ~30s of the Greenfield daemon dying so the
-    # desktop can show a "daemon not responding" badge.
-    daemon_alive: bool = True
 
 
 @router.get("/sync_status", response_model=SyncStatus)
 async def get_sync_status(
     current_user: str = Depends(get_current_user),
 ) -> SyncStatus:
-    """Read the chain backend's WAL — every entry is a Greenfield
-    write that hasn't been confirmed yet (either the put is in
-    flight, or the previous shutdown cancelled it before completing).
+    """Report pending storage writes.
 
-    Lets the desktop's Work Directory annotate each file:
-      * NOT in pending_paths → ✅ synced (or never existed)
-      * IN pending_paths     → ⏳ pending Greenfield put
+    ChainBackend persists data synchronously to its local store, so
+    this always reports an empty queue today. Kept for the desktop's
+    Work Directory badge polling; it will report real queue state
+    again once a remote object-storage mirror is reintroduced.
     """
-    twin = await twin_manager.get_twin(current_user)
-    bucket = ""
-    pending: list[str] = []
-    write_failure_count = 0
-    last_write_error: Optional[dict] = None
-    daemon_alive = True
-    try:
-        rune = getattr(twin, "rune", None)
-        backend = getattr(rune, "_backend", None) if rune else None
-        if backend is None and rune is not None:
-            backend = getattr(rune, "backend", None)
-        if backend is not None:
-            wal = getattr(backend, "_wal", None)
-            if wal is not None:
-                pending = sorted({
-                    e.get("path", "") for e in wal.read_all()
-                    if e.get("path")
-                })
-            gf = getattr(backend, "_greenfield", None)
-            if gf is not None:
-                bucket = getattr(gf, "_bucket_name", "") or getattr(gf, "bucket_name", "") or ""
-            # Phase Q audit fix #4 + #5
-            write_failure_count = int(
-                getattr(backend, "write_failure_count", 0) or 0
-            )
-            last_write_error = getattr(backend, "last_write_error", None)
-            daemon_alive = bool(
-                getattr(backend, "daemon_alive", True)
-            )
-    except Exception as e:
-        logger.debug("sync_status read failed for %s: %s", current_user, e)
-
+    # Touch the twin so lazy creation still happens on first poll
+    # (previous behaviour) — cheap once the twin is cached.
+    await twin_manager.get_twin(current_user)
     return SyncStatus(
-        pending_paths=pending,
-        wal_entry_count=len(pending),
-        bucket=bucket,
-        write_failure_count=write_failure_count,
-        last_write_error=last_write_error,
-        daemon_alive=daemon_alive,
+        pending_paths=[],
+        wal_entry_count=0,
     )
 
 
@@ -736,8 +681,9 @@ class NamespaceChainStatus(BaseModel):
     """Per-namespace on-chain mirror state.
 
     ``status`` is one of:
-      * ``"local"`` — committed locally; not yet mirrored to Greenfield
-      * ``"mirrored"`` — Greenfield received the blob; the agent's
+      * ``"local"`` — committed locally; not yet persisted by the
+        chain backend
+      * ``"mirrored"`` — the chain backend stored the blob; the agent's
         on-chain state_root has NOT been re-anchored since the last
         commit (so chain readers will not yet see this version)
       * ``"anchored"`` — ``last_anchor_at >= last_commit_at``; this
@@ -752,38 +698,16 @@ class NamespaceChainStatus(BaseModel):
 
 
 class ChainHealthCard(BaseModel):
-    wal_queue_size: int = 0
-    daemon_alive: bool = True
-    last_daemon_ok: Optional[float] = None
-    greenfield_ready: bool = False
     bsc_ready: bool = False
-    # Greenfield-side observability fields, added after the agent #985
-    # incident where every Greenfield write silently fell back to local
-    # cache and the desktop card stayed solid green. ``fallback_active``
-    # is True iff a Greenfield→local fallback happened in the last
-    # ~5 min; ``last_write_error`` carries the human-readable reason
-    # so the desktop tooltip can show "Cannot find module …" etc.
-    # directly instead of forcing the operator into the server logs.
-    fallback_active: bool = False
-    last_write_error: Optional[dict] = None
-    # BSC-side counterparts to fallback_active / last_write_error.
-    # Same silent-failure class as Greenfield: previously bsc_ready was
+    # BSC anchor observability. Previously bsc_ready was
     # `chain_client is not None`, so the dot stayed green even while
     # every anchor call was reverting (RPC down, nonce stuck, gas
     # exhausted). Now bsc_ready flips false on a recent failure and
     # last_bsc_anchor_error carries the reason.
     bsc_failure_active: bool = False
     last_bsc_anchor_error: Optional[dict] = None
-    # WAL longevity. ``wal_queue_size`` alone is misleading: it tells
-    # you HOW MANY writes are pending but not HOW LONG. A WAL with one
-    # 12-hour-old entry is a real problem; the same count from a 3-sec
-    # backpressure spike is not. Surface the oldest entry's age + path
-    # so the desktop can show "3 writes stuck for >6 min — oldest is
-    # agents/.../session_xyz.json".
-    wal_oldest_age_seconds: Optional[float] = None
-    wal_oldest_pending_path: Optional[str] = None
-    # All new fields default to safe values so older server builds
-    # (without these keys in chain_health_snapshot) still deserialize.
+    # All fields default to safe values so older snapshot shapes
+    # still deserialize.
 
 
 class ChainStatusResponse(BaseModel):
@@ -818,9 +742,7 @@ async def get_chain_status(
 
     last_anchor: Optional[float] = None
     health_dict: dict = {
-        "wal_queue_size": 0, "daemon_alive": True,
-        "last_daemon_ok": None,
-        "greenfield_ready": False, "bsc_ready": False,
+        "bsc_ready": False,
     }
     if backend is not None:
         try:
@@ -879,7 +801,7 @@ async def get_chain_status(
 # things like the pdf / xlsx / docx skills from Anthropic's marketplace
 # or LobeHub. It is NOT the same as Brain panel's "Heuristics" card,
 # which is the strategies the SkillEvolver learned from chat history
-# and lives in namespaces/skills/v{N}.json on Greenfield.
+# and lives in namespaces/skills/v{N}.json in the agent's store.
 #
 # The two are distinct concepts:
 #   * Heuristics (= internal strategies, learned)  — agent's reflexes
@@ -940,7 +862,7 @@ async def get_installed_skills(
     return InstalledSkillsResponse(skills=rows, total=len(rows))
 
 
-# ── Chain operations log — every Greenfield/BSC attempt with status ──
+# ── Chain operations log — every BSC anchor attempt with status ──
 
 
 class ChainEvent(BaseModel):
@@ -949,16 +871,15 @@ class ChainEvent(BaseModel):
     Statuses (set by twin_manager._ChainActivityLogHandler from log
     line regexes):
       * ``ok``        — the write actually landed on chain.
-      * ``degraded``  — local cache hit but chain didn't (Greenfield
-                        bucket missing, RPC slow, etc). Data isn't
-                        lost, but it isn't anchored either.
-      * ``failed``    — neither chain nor local fallback succeeded.
+      * ``degraded``  — legacy status from the removed object-storage
+                        mirror; may appear on historical rows.
+      * ``failed``    — the chain write did not land.
 
     The desktop's chain log panel renders these three differently
     (green / amber / red) so the operator can audit recent activity
     without SSH-ing into the server to query the SQLite table.
     """
-    kind: str          # "greenfield_put" | "bsc_anchor"
+    kind: str          # "bsc_anchor" (legacy rows may carry other kinds)
     status: str        # "ok" | "degraded" | "failed"
     summary: str = ""
     tx_hash: Optional[str] = None
@@ -982,7 +903,7 @@ async def get_chain_events(
     """Recent chain operations for this user, newest first.
 
     Used by the desktop's "Chain Operations" log to show the last N
-    Greenfield PUTs / BSC anchors with their status. Replaces the old
+    BSC anchors with their status. Replaces the old
     workflow of "SSH to the server and SELECT from twin_chain_events"
     every time something looks off.
 
@@ -1518,7 +1439,7 @@ async def get_evolution_pressure(
     Endpoint is meant to be polled every 5s — much slower cadence
     than the per-2s Cognition stream because pressure changes
     slowly. All work is local (in-process pressure_state calls +
-    a bounded EventLog scan), no Greenfield round-trips.
+    a bounded EventLog scan), no remote round-trips.
     """
     twin = await twin_manager.get_twin(current_user)
     items: list[EvolutionPressureItem] = []

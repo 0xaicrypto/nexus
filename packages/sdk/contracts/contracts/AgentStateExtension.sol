@@ -8,7 +8,7 @@ import "./IIdentityRegistry.sol";
  * @notice Extends ERC-8004 agents with a stateless execution layer.
  *
  *         Stores two fields per agent:
- *           - state_root (bytes32): SHA-256 hash pointing to full state on Greenfield
+ *           - state_root (bytes32): SHA-256 hash pointing to the full off-chain state payload
  *           - active_runtime (address): which runtime currently holds execution
  *
  *         Permission: Only the ERC-8004 NFT owner can update their agent's state.
@@ -21,7 +21,7 @@ contract AgentStateExtension {
     // ── State ──────────────────────────────────────────────────────
 
     struct AgentState {
-        bytes32 stateRoot;       // SHA-256 hash → Greenfield full payload
+        bytes32 stateRoot;       // SHA-256 hash → full off-chain payload
         address activeRuntime;   // address of current executing runtime
         uint256 updatedAt;       // block.timestamp of last state commit
     }
@@ -81,11 +81,11 @@ contract AgentStateExtension {
     /**
      * @notice Update the state root for an agent.
      * @dev Only callable by the ERC-8004 NFT owner.
-     *      This is the critical BSC ↔ Greenfield link:
-     *      the stateRoot hash points to the full state payload on Greenfield.
+     *      This is the critical BSC ↔ off-chain storage link:
+     *      the stateRoot hash points to the full off-chain state payload.
      *
      * @param agentId     ERC-8004 tokenId
-     * @param stateRoot   SHA-256 hash of the state payload on Greenfield
+     * @param stateRoot   SHA-256 hash of the off-chain state payload
      * @param runtime     Address of the runtime committing this state
      */
     function updateStateRoot(
@@ -128,7 +128,7 @@ contract AgentStateExtension {
 
     /**
      * @notice Resolve the current state root for an agent.
-     * @return stateRoot SHA-256 hash pointing to Greenfield
+     * @return stateRoot SHA-256 hash pointing to the off-chain payload
      */
     function resolveStateRoot(uint256 agentId) external view returns (bytes32) {
         return agents[agentId].stateRoot;

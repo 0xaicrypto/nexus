@@ -258,51 +258,10 @@ class TestBug13_CorruptedArtifactRejection:
         assert result is None
 
 
-# ══════════════════════════════════════════════════════════════════════
-# Bug #14: Negative cache never expires within session
-# ══════════════════════════════════════════════════════════════════════
-
-class TestBug14_NegativeCacheTTL:
-    """Negative cache entries were permanent (set). Now dict with TTL."""
-
-    def test_neg_cache_is_dict_with_ttl(self):
-        from nexus_core.backends.chain import ChainBackend
-        # Verify the class defines TTL-based negative cache
-        # We can't instantiate ChainBackend easily, but we can
-        # verify the implementation exists
-        import inspect
-        source = inspect.getsource(ChainBackend)
-        assert "_NEG_CACHE_TTL" in source
-        assert "_neg_cache_hit" in source
-
-    def test_neg_cache_hit_logic(self):
-        """Test the TTL expiry logic pattern."""
-        cache = {}
-        ttl = 600.0
-
-        def add(path):
-            cache[path] = time.time() + ttl
-
-        def hit(path):
-            expiry = cache.get(path)
-            if expiry is None:
-                return False
-            if time.time() > expiry:
-                del cache[path]
-                return False
-            return True
-
-        # Miss on empty cache
-        assert hit("path1") is False
-
-        # Add and hit
-        add("path1")
-        assert hit("path1") is True
-
-        # Simulate expired entry
-        cache["path2"] = time.time() - 1  # already expired
-        assert hit("path2") is False
-        assert "path2" not in cache  # cleaned up
+# Bug #14 (negative-cache TTL) test class deleted: the negative cache
+# existed to avoid repeated remote object-storage round-trips. The
+# remote data plane was removed (ChainBackend now reads its local
+# store directly), so there is no negative cache to regression-test.
 # Phase D 续 #2: MemoryProvider-specific test classes deleted
 # (TestBug_EnsureLoadedCancelSafety, TestBug15, TestBug18,
 # TestFeature_MemoryCapacityManagement, TestFeature_MemoryAccessTracking).
@@ -348,13 +307,13 @@ class TestBug12_CacheWriteOSError:
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Bug #17: Graceful shutdown — pending Greenfield writes were cancelled
+# Bug #17: Graceful shutdown — pending background tasks were cancelled
 # immediately on exit, causing data loss for the last 1-2 turns
 # ══════════════════════════════════════════════════════════════════════
 
 class TestBug17_GracefulShutdown:
     """ChainBackend.close() immediately cancelled all pending tasks.
-    Now waits up to grace_period seconds for writes to finish."""
+    Now waits up to grace_period seconds for them to finish."""
 
     def test_chain_backend_close_has_grace_period(self):
         """close() should accept a grace_period parameter."""

@@ -7,7 +7,7 @@ They exchange perspectives to test compatibility, not to complete tasks.
 Transport modes:
   - sync:  Messages stay in memory. Both agents must be in the same runtime.
            No chain persistence. Fast, ephemeral. Good for co-located agents.
-  - async: Messages stored on Greenfield via StorageBackend. Agents can be
+  - async: Messages stored via StorageBackend. Agents can be
            offline at different times. Persistent and verifiable.
 
 Privacy: Gossip content must NOT contain private user data. Agents discuss

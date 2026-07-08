@@ -153,16 +153,21 @@ def init_db() -> None:
     # directly.
 
     # Sync anchors table — one row per /sync/push batch that we attempt
-    # to push to Greenfield + anchor on BSC. Status is the source of
-    # truth for "did the durable copy land yet".
+    # to anchor on BSC. Status is the source of truth for "did the
+    # anchor land yet".
     #
     # Status values:
     #   'pending'              — created, work hasn't started
-    #   'stored_only'          — Greenfield write succeeded, BSC anchor
-    #                            skipped (no chain config or no agent id)
-    #   'anchored'             — Greenfield + BSC both succeeded
+    #   'stored_only'          — hash computed + stored locally, BSC
+    #                            anchor skipped (no chain config or no
+    #                            agent id)
+    #   'anchored'             — BSC anchor succeeded
     #   'failed'               — terminal failure (see error column)
     #   'awaiting_registration' — user has no chain_agent_id yet
+    #
+    # greenfield_path is a LEGACY column from the removed decentralised
+    # object-storage mirror. Kept in the schema so existing databases
+    # don't need a migration; never written for new rows.
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS sync_anchors (
@@ -210,13 +215,13 @@ def init_db() -> None:
     # for chat traffic, so ``sync_anchors`` no longer accumulates rows
     # for normal chat-mode users. The desktop sidebar's anchor counters
     # were therefore stuck at 0/0/0 even when twin's ChainBackend was
-    # successfully writing BSC anchors and Greenfield objects in the
-    # background. Without a row anywhere, "Greenfield put failed" only
-    # surfaced in server stderr — invisible to the operator.
+    # successfully writing BSC anchors in the background. Without a row
+    # anywhere, anchor failures only surfaced in server stderr —
+    # invisible to the operator.
     #
     # This table is the new mirror: a logging.Handler in twin_manager
-    # subscribes to the SDK's ``rune.backend.chain`` and
-    # ``rune.greenfield`` loggers and writes one row per chain write
+    # subscribes to the SDK's ``rune.backend.chain`` logger and writes
+    # one row per chain write
     # attempt. ``status`` is intentionally only ``ok`` / ``failed`` —
     # twin's ChainBackend is synchronous w.r.t. the BSC tx, so there
     # is no "pending" state to track here (unlike legacy sync_anchors).

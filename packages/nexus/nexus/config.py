@@ -54,15 +54,12 @@ class TwinConfig:
     use_chain: bool = False
     private_key: str = ""
 
-    # ── Chain (BSC + Greenfield) ──
+    # ── Chain (BSC) ──
     network: str = "testnet"  # "testnet" | "mainnet"
     rpc_url: str = ""
     agent_state_address: str = ""
     task_manager_address: str = ""
     identity_registry_address: str = ""
-    # Per-agent bucket required in chain mode. Compute via
-    # ``nexus_core.bucket_for_agent(token_id)``. No shared default.
-    greenfield_bucket: str = ""
 
     # ── Persona (initial — will be evolved) ──
     base_persona: str = ""

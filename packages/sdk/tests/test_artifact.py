@@ -158,7 +158,7 @@ class TestArtifactVersioning:
             assert len(av_list) == 1
             assert av_list[0].version == 1
             assert av_list[0].custom_metadata["accuracy"] == "0.95"
-            assert "greenfield://" in av_list[0].canonical_uri
+            assert "rune://" in av_list[0].canonical_uri
 
         asyncio.run(_test())
 

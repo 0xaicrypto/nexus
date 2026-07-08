@@ -526,7 +526,7 @@ class TestToolLoop:
     # ── S2: TwinManager chain-mode kwarg resolution ────────────────────
     #
     # We can't actually spin up a real DigitalTwin in chain mode in unit
-    # tests (would require a live BSC node + Greenfield), so the test
+    # tests (would require a live BSC node), so the test
     # surface is the *decision* function _resolve_chain_kwargs — does it
     # produce the right kwargs given a particular config + DB state?
 
@@ -549,8 +549,7 @@ class TestToolLoop:
 
     def test_twin_chain_kwargs_local_when_user_unregistered(self, client):
         """SERVER_PRIVATE_KEY present, but the user has no
-        chain_agent_id yet — twin must start in local mode (we never
-        guess at a bucket name without a token id)."""
+        chain_agent_id yet — twin must start in local mode."""
         from nexus_server import twin_manager
         from nexus_server import config as cfg_mod
         from nexus_server.database import get_db_connection
@@ -647,15 +646,10 @@ class TestToolLoop:
 
     def test_twin_chain_kwargs_built_when_registered(self, client):
         """All chain prereqs present + user has chain_agent_id → twin
-        gets a per-agent Greenfield bucket and full chain kwargs.
-
-        Verifies the bucket name is computed via bucket_for_agent, not
-        a shared default — this is the post-S0 invariant we explicitly
-        broke the legacy fallback for."""
+        gets full chain kwargs."""
         from nexus_server import twin_manager
         from nexus_server import config as cfg_mod
         from nexus_server.database import get_db_connection
-        from nexus_core.utils.agent_id import bucket_for_agent
 
         reg = client.post(
             "/api/v1/auth/register",
@@ -702,9 +696,6 @@ class TestToolLoop:
             assert kwargs["agent_state_address"] == "0xAS"
             assert kwargs["identity_registry_address"] == "0xIR"
             assert kwargs["task_manager_address"] == "0xTM"
-            # **The** key invariant: per-agent bucket, not shared.
-            assert kwargs["greenfield_bucket"] == bucket_for_agent(TOKEN_ID)
-            assert "nexus-agent-" in kwargs["greenfield_bucket"]
         finally:
             cfg.SERVER_PRIVATE_KEY = old_pk
             cfg.NEXUS_TESTNET_RPC = old_rpc
@@ -1235,11 +1226,11 @@ class TestChainProxy:
             cp._chain_client_test_override = None
 
 
-# ── Sync Anchor: Greenfield + BSC durable copy ────────────────────────
+# ── Sync Anchor: BSC anchoring pipeline ──────────────────────────────
 
 
 class TestSyncAnchor:
-    """sync_anchor's pipeline: SHA-256 the batch, PUT to Greenfield,
+    """sync_anchor's pipeline: SHA-256 the batch,
     anchor on BSC, expose progress via GET /api/v1/sync/anchors.
 
     S4 NOTE: /sync/push no longer enqueues anchors automatically — chain-
@@ -1303,7 +1294,7 @@ class TestSyncAnchor:
 
     def test_no_chain_records_stored_only(self, client, monkeypatch):
         """No chain config + no test override → status='stored_only'.
-        Greenfield write is skipped, but the deterministic SHA-256 is
+        The deterministic SHA-256 is
         still computed and the anchor row is recorded.
 
         Force ``chain_is_configured`` False so the test doesn't depend on
@@ -1312,7 +1303,6 @@ class TestSyncAnchor:
         from nexus_server import sync_anchor as sa
         from nexus_server import config as cfg_mod
         sa._chain_backend_test_override = None  # belt-and-suspenders
-        sa._greenfield = None
         sa._chain_client = None
         monkeypatch.setattr(cfg_mod.ServerConfig, "SERVER_PRIVATE_KEY", None)
 
@@ -1335,19 +1325,14 @@ class TestSyncAnchor:
         assert a["bsc_tx_hash"] is None
 
     def test_full_anchor_path_with_fake_backend(self, client):
-        """Inject a fake AnchorBackend that succeeds on both legs
-        → status='anchored', greenfield_path set, bsc_tx_hash set."""
+        """Inject a fake AnchorBackend that succeeds
+        → status='anchored', bsc_tx_hash set."""
         from nexus_server import sync_anchor as sa
         from nexus_server.database import get_db_connection
 
         class FakeBackend(sa.AnchorBackend):
             def __init__(self):
-                self.put_calls = []
                 self.anchor_calls = []
-
-            async def put_json(self, payload, path):
-                self.put_calls.append((payload, path))
-                return path
 
             def anchor(self, agent_id_int, content_hash_hex, runtime):
                 self.anchor_calls.append(
@@ -1378,11 +1363,9 @@ class TestSyncAnchor:
             assert len(anchors) == 1
             a = anchors[0]
             assert a["status"] == "anchored"
-            assert a["greenfield_path"]
             assert a["bsc_tx_hash"] == "0xfeedface"
 
             # Backend really got called
-            assert len(fake.put_calls) == 1
             assert len(fake.anchor_calls) == 1
             agent_id_int, hash_hex, _ = fake.anchor_calls[0]
             assert agent_id_int == 7
@@ -1398,9 +1381,6 @@ class TestSyncAnchor:
         from nexus_server.database import get_db_connection
 
         class BoomBackend(sa.AnchorBackend):
-            async def put_json(self, payload, path):
-                return path  # Greenfield ok…
-
             def anchor(self, agent_id_int, content_hash_hex, runtime):
                 raise RuntimeError("nonce too low")
 
@@ -1428,18 +1408,15 @@ class TestSyncAnchor:
             sa._chain_backend_test_override = None
 
     def test_anchor_awaiting_registration_when_no_chain_agent_id(self, client):
-        """Greenfield write succeeds, but user has no chain_agent_id
+        """User has no chain_agent_id
         → status='awaiting_registration' (NOT 'failed')."""
         from nexus_server import sync_anchor as sa
 
-        class GfOnly(sa.AnchorBackend):
-            async def put_json(self, payload, path):
-                return path
-
+        class NoAnchor(sa.AnchorBackend):
             def anchor(self, *a, **kw):
                 raise AssertionError("BSC anchor should not be called")
 
-        sa._chain_backend_test_override = GfOnly()
+        sa._chain_backend_test_override = NoAnchor()
         try:
             token, user_id = self._get_token_and_user(client)
             push = self._push_one(client, token, user_id=user_id)
@@ -1455,14 +1432,13 @@ class TestSyncAnchor:
 
     def test_chain_activity_log_handler_captures_anchor_and_failure(self, client):
         """Bug 3 contract: the SDK's chain activity logs (BSC anchor
-        commits, Greenfield PUT failures) flow through the logging
-        handler installed by ``twin_manager.install_chain_activity_handler``
+        commits AND failures) flow through the logging handler
+        installed by ``twin_manager.install_chain_activity_handler``
         into the ``twin_chain_events`` table. /agent/state and
         /agent/timeline then surface them.
 
         Without this, the desktop sidebar shows ``0 anchored / 0 pending``
-        forever — every chain operation goes straight to stderr, the
-        operator has no idea their Greenfield bucket isn't created.
+        forever — every chain operation goes straight to stderr.
         """
         import logging
         from nexus_server import twin_manager
@@ -1480,7 +1456,6 @@ class TestSyncAnchor:
         twin_manager.install_chain_activity_handler()
         try:
             chain_log = logging.getLogger("nexus_core.backend.chain")
-            gf_log = logging.getLogger("nexus_core.greenfield")
 
             # 1. Successful BSC anchor — handler should write status=ok row
             chain_log.warning(
@@ -1488,10 +1463,11 @@ class TestSyncAnchor:
                 agent_id_str, "abc123def456", "deadbeefcafe", 1.42,
             )
 
-            # 2. Greenfield put failure — should write status=failed row
-            gf_log.warning(
-                "Greenfield put failed: %s",
-                "put failed: Query failed with (6): No such bucket: unknown request",
+            # 2. BSC anchor failure — should write status=failed row
+            chain_log.warning(
+                "[FALLBACK][BSC] Anchor failed for %s — agent=%s hash=%s reason=%s",
+                agent_id_str, agent_id_str, "abc123def456",
+                "execution reverted: nonce too low",
             )
 
             # 3. State endpoint reflects both
@@ -1502,10 +1478,10 @@ class TestSyncAnchor:
             assert state["anchored_count"] >= 1, state
             assert state["failed_anchor_count"] >= 1, state
             assert state["last_chain_event"] is not None
-            # Newest event is the Greenfield failure (last logged)
+            # Newest event is the anchor failure (last logged)
             last = state["last_chain_event"]
             assert last["status"] == "failed"
-            assert "No such bucket" in (last["error"] or "")
+            assert "nonce too low" in (last["error"] or "")
 
             # 4. Timeline surfaces both kinds
             tl = client.get(
@@ -1514,7 +1490,7 @@ class TestSyncAnchor:
             ).json()
             kinds = {it["kind"] for it in tl["items"]}
             assert "anchor.committed" in kinds, kinds
-            assert "greenfield.put_failed" in kinds, kinds
+            assert "anchor.failed" in kinds, kinds
         finally:
             twin_manager.uninstall_chain_activity_handler()
 

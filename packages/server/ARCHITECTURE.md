@@ -37,7 +37,7 @@ HTTP / browser ─┤  FastAPI app (main.py)    │
                   per-user nexus.DigitalTwin
                        │              │
               EventLog SQLite       ChainBackend
-            (~/.nexus_server/        (BSC + Greenfield
+            (~/.nexus_server/        (BSC anchoring
              twins/{uid}/…)           via nexus_core)
 ```
 
@@ -55,7 +55,7 @@ HTTP / browser ─┤  FastAPI app (main.py)    │
 | `files.py` | Per-user file picker + upload | `POST /api/v1/files/upload` |
 | `chain_proxy.py` | ERC-8004 reads (`/me`, `/agent/{id}`); the legacy `/register-agent` endpoint is deprecated — twin auto-bootstraps on first chat (S6). | `/api/v1/chain/me`, `/api/v1/chain/agent/{id}` |
 | `sync_anchor.py` | Read-only legacy view: `enqueue_anchor` + `list_anchors_for_user`. The Phase A retry daemon was deleted in Phase B. | – |
-| `twin_manager.py` | Per-user `DigitalTwin` lifecycle: lazy create, idle eviction, `bootstrap_chain_identity`, `_ChainActivityLogHandler` (Bug 3 — capture SDK chain activity into `twin_chain_events` so the desktop sidebar can show anchor success / Greenfield failures). | – |
+| `twin_manager.py` | Per-user `DigitalTwin` lifecycle: lazy create, idle eviction, `bootstrap_chain_identity`, `_ChainActivityLogHandler` (Bug 3 — capture SDK chain activity into `twin_chain_events` so the desktop sidebar can show anchor successes / failures). | – |
 | `twin_event_log.py` | Read-only views over each user's twin EventLog SQLite. Used by `agent_state` to serve `/agent/{messages,memories,timeline}` without instantiating a twin. | – |
 | `agent_state.py` | The read API surface | `/api/v1/agent/{state,timeline,memories,messages}`, `/api/v1/sync/anchors` |
 | `user_profile.py` | Profile management | `/api/v1/profile/*` |
@@ -81,8 +81,7 @@ pytest --cov=nexus_server tests/
 ~/.nexus_server/twins/{user_id}/state/                  # CuratedMemory + ABC contract state
 ```
 
-The on-chain anchoring (per-agent Greenfield bucket
-`nexus-agent-{token_id}`, BSC `IdentityRegistry.updateStateRoot`)
+The on-chain anchoring (BSC `IdentityRegistry.updateStateRoot`)
 is owned by the twin's `ChainBackend` (driven by the SDK), not by
 the server. The server only sees chain *activity* via the log
 handler that mirrors SDK log records into `twin_chain_events` for
@@ -109,6 +108,6 @@ working — twin-path tests opt in by setting
 | Anchor retry daemon | deleted — `ChainBackend` owns retry | B |
 | `nexus.{tools,skills,mcp}` shim packages | tombstones; import `nexus_core.*` | E |
 | Logger namespace `rune.*` | `nexus_core.*` | F |
-| Greenfield bucket `rune-agent-{token_id}` | `nexus-agent-{token_id}` | F |
+| Object-storage bucket `rune-agent-{token_id}` (data plane since removed) | `nexus-agent-{token_id}` | F |
 
 See root [`HISTORY.md`](../../HISTORY.md) for the full chronology.

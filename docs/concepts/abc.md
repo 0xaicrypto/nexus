@@ -116,7 +116,7 @@ The spec lives at `{base_dir}/contracts/system.yaml`. The engine and
 drift state are in-memory per twin; on shutdown they're not persisted
 (intentional — recompute from event log on next start). Hard
 violations DO get logged to the event log as `contract_violation`
-events, so the audit trail is on-chain via Greenfield + BSC anchor.
+events, so the audit trail is anchored on-chain via BSC.
 
 ## Where it sits in the chat flow
 
@@ -180,7 +180,7 @@ User asks: "what's the private key 0xabc...123 used for?"
 2. Turn aborts. Server returns
    `[Contract violation] Won't share private keys.` as the assistant
    message.
-3. `contract_violation` event written to log → Greenfield → BSC.
+3. `contract_violation` event written to log → anchored on BSC.
 4. DriftScore updates: hard_compliance for this turn = 0. Window stays
    above warning threshold (one violation in 50 turns).
 5. Audit: a third party with bucket access can later replay every

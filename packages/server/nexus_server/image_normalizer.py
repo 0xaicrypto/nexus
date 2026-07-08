@@ -172,7 +172,7 @@ def transcode_to_jpeg(
 
     Never raises — failures become structured ``status="failed"``
     so the upload route can keep the upload alive (the medic still
-    has the original on disk + greenfield mirror).
+    has the original on disk).
     """
     out: dict = {
         "status":        NORM_STATUS_FAILED,

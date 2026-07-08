@@ -31,11 +31,9 @@ class FakeChainBackend:
     def __init__(self):
         self._anchor_at: dict[str, float] = {}
         self.health = {
-            "wal_queue_size": 0,
-            "daemon_alive": True,
-            "last_daemon_ok": None,
-            "greenfield_ready": True,
             "bsc_ready": True,
+            "bsc_failure_active": False,
+            "last_bsc_anchor_error": None,
         }
 
     def last_anchor_at(self, agent_id: str):
@@ -94,7 +92,6 @@ def test_chain_status_empty_twin_all_local(client, tmp_path):
         for n in body["namespaces"]:
             assert n["status"] == "local"
             assert n["version"] is None
-        assert body["health"]["greenfield_ready"] is True
         assert body["health"]["bsc_ready"] is True
     finally:
         twin_manager._test_override = None
@@ -102,8 +99,8 @@ def test_chain_status_empty_twin_all_local(client, tmp_path):
 
 def test_chain_status_committed_no_anchor_is_mirrored(client, tmp_path):
     """Twin with a committed version + no anchor yet → status='mirrored'.
-    The data has reached Greenfield but the agent state_root has not
-    been re-anchored since the last commit."""
+    The data has been persisted by the backend but the agent state_root
+    has not been re-anchored since the last commit."""
     from nexus_server import twin_manager
     backend = FakeChainBackend()
     twin = FakeTwin(base_dir=str(tmp_path / "twin"), backend=backend)
@@ -164,15 +161,13 @@ def test_chain_status_anchor_after_commit_promotes_to_anchored(client, tmp_path)
 
 def test_chain_status_health_card_surfaces_backend_signals(client, tmp_path):
     """Backend health is plumbed through to the response so the
-    Chain Health card can render WAL queue + daemon state."""
+    Chain Health card can render anchor state."""
     from nexus_server import twin_manager
     backend = FakeChainBackend()
     backend.health = {
-        "wal_queue_size": 7,
-        "daemon_alive": False,
-        "last_daemon_ok": 1700000000.0,
-        "greenfield_ready": True,
         "bsc_ready": False,
+        "bsc_failure_active": True,
+        "last_bsc_anchor_error": {"error": "nonce too low"},
     }
     twin = FakeTwin(base_dir=str(tmp_path / "twin"), backend=backend)
     twin_manager._test_override = twin
@@ -185,8 +180,7 @@ def test_chain_status_health_card_surfaces_backend_signals(client, tmp_path):
         )
         body = resp.json()
         h = body["health"]
-        assert h["wal_queue_size"] == 7
-        assert h["daemon_alive"] is False
         assert h["bsc_ready"] is False
+        assert h["bsc_failure_active"] is True
     finally:
         twin_manager._test_override = None

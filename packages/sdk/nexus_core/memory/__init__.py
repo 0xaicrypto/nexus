@@ -2,7 +2,7 @@
 
 DPM primitives (the canonical event-log + projection layer):
 
-* :class:`EventLog` — append-only event log (SQLite + FTS5, syncs to Greenfield)
+* :class:`EventLog` — append-only event log (SQLite + FTS5, snapshots via the chain backend)
 * :class:`CuratedMemory` — derived view (MEMORY.md + USER.md), the original
   flat curated store
 * :class:`EventLogCompactor` — auto-compact event log → CuratedMemory

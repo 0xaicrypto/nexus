@@ -9,7 +9,6 @@
 #   * Installs Python (via brew) if 3.11+ not found
 #   * Installs Node (via brew) if 20+ not found
 #   * Creates Python venv and pip-installs nexus_server + transitive deps
-#   * Runs `npm install` for the Greenfield daemon's deps
 #   * Writes ~/Library/Application Support/RuneProtocol/.setup_complete_v1
 #
 # Inputs
@@ -25,7 +24,7 @@
 #   2   brew missing (we tell the user to install Homebrew and bail)
 #   3   python install / venv failure
 #   4   pip install failure
-#   5   npm install failure
+#   5   (reserved — was: npm install failure)
 #
 # Why not just bundle Python via PyInstaller?
 # ──────────────────────────────────────────
@@ -307,30 +306,6 @@ else
   else
     echo "  no new keys in bundle; user .env unchanged"
   fi
-fi
-
-# ── 5. Node deps for Greenfield daemon ───────────────────────────────
-# In bundle mode (REPO_ROOT inside .app), build-macos.sh has already
-# run `npm install --omit=dev` so node_modules ships with the .dmg.
-# In dev mode we install fresh if missing or stale.
-SDK_DIR="$REPO_ROOT/packages/sdk"
-if [[ -d "$SDK_DIR/node_modules" ]]; then
-  echo "✓ Node deps already present (bundled or previously installed)"
-elif [[ "$EDITABLE_FLAG" == "" ]]; then
-  # Bundle mode but node_modules missing — try to recover. .app source
-  # is read-only so we can't npm install there; copy to a writable
-  # location and use that. This is the recovery path; normal bundle
-  # builds should never hit it.
-  echo "  ⚠ bundled .app missing node_modules under packages/sdk;"
-  echo "    this should have been pre-installed by build-macos.sh."
-  echo "    Attempting npm install in-place (will likely fail if .app"
-  echo "    is in /Applications)…"
-  ( cd "$SDK_DIR" && npm install --omit=dev --silent ) \
-    || { echo "✗ npm install failed (see $LOG)"; exit 5; }
-else
-  echo "→ Installing Greenfield daemon deps under $SDK_DIR"
-  ( cd "$SDK_DIR" && npm install --silent ) \
-    || { echo "✗ npm install failed (see $LOG)"; exit 5; }
 fi
 
 # ── 6. Marker file ───────────────────────────────────────────────────

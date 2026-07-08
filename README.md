@@ -26,11 +26,11 @@ A Nexus agent is the opposite. It has:
    memories, persona, skills, and social impressions all carry over.
 
 2. **A memory that is a chained log, not a session buffer.** Every event
-   ever observed is appended to a SQLite-backed `EventLog`. The log
-   syncs to BNB Greenfield, and a SHA-256 root over a deterministic
-   manifest of recent events is anchored to BSC after each compaction.
-   You can replay the bucket, recompute the root, and prove the agent
-   didn't lie about its own history.
+   ever observed is appended to a SQLite-backed `EventLog`, and a
+   SHA-256 root over a deterministic manifest of recent events is
+   anchored to BSC after each compaction. You can replay the log,
+   recompute the root, and prove the agent didn't lie about its own
+   history.
 
 3. **A self-evolution loop that is *falsifiable*.** Every persona /
    memory / skill / knowledge edit emits an `evolution_proposal` event
@@ -79,31 +79,28 @@ going well.
 ┌────────────▼────────────┐
 │  nexus_core SDK         │   AgentRuntime facade
 │   EventLog + 5 stores   │   ContractEngine + DriftScore
-│   ChainBackend          │   BSCClient + GreenfieldClient
+│   ChainBackend          │   BSCClient
 └────────────┬────────────┘
              │
-       ┌─────┴─────┐
-       ▼           ▼
-   BSC RPC    Greenfield SP
-   (anchor)   (per-agent
-              bucket)
+             ▼
+          BSC RPC
+         (anchor)
 ```
 
 A user installs the desktop, signs in with a passkey, and starts chatting.
 On the first message:
 
 1. **Server** lazily creates a `DigitalTwin` for that user and bootstraps
-   on-chain identity: deploys a Greenfield bucket
-   `nexus-agent-{token_id}`, mints an ERC-8004 token, sets
+   on-chain identity: mints an ERC-8004 token and sets
    `activeRuntime` on the AgentStateExtension contract to this server's
    wallet.
 2. **Twin** runs its [9-step chat flow](docs/concepts/data-flow.md):
    ABC pre-check → append user message to EventLog → project relevant
    memory → call LLM with tools → ABC post-check → DriftScore update →
    append assistant response → fire background self-evolution.
-3. **SDK** writes the new EventLog rows to Greenfield and, after every
-   compaction, anchors the new state root on BSC. Reads are served from
-   the local SQLite mirror so chat latency is unaffected.
+3. **SDK** persists the new EventLog rows to its durable store and,
+   after every compaction, anchors the new state root on BSC. Reads are
+   served from the local SQLite mirror so chat latency is unaffected.
 4. **Desktop** receives the response over HTTP and re-fetches its
    panels in the background — Brain (learning + chain status), Pressure
    Dashboard (which evolver is about to fire), Evolution timeline,
@@ -114,7 +111,7 @@ The "self-evolving" part is real and observable in two places:
 - **Brain panel** answers *"is my agent learning, and is what it
   learned safely on chain?"* — namespace counts + 7-day timeline +
   data-flow pipeline + just-learned feed + chain-health card, with
-  every item tagged ● local · ● mirrored to Greenfield · ● anchored
+  every item tagged ● local · ● persisted · ● anchored
   on BSC.
 - **Evolution panel** shows the falsifiable loop: every persona /
   memory / skill edit recorded as a proposal, then graded as a
@@ -200,11 +197,11 @@ Each agent's on-chain footprint:
 
 - **ERC-8004 NFT** on BSC `IdentityRegistry`. The `tokenId` is the
   permanent agent id. Transferring the NFT transfers the agent.
-- **One Greenfield bucket** per agent: `nexus-agent-{tokenId}`. Holds
-  the EventLog mirror, namespace store snapshots, and per-version
-  manifests.
-- **`AgentStateExtension` contract** stores the latest state-root +
-  bucket pointer for each agent and tracks `activeRuntime` (which
+- **A durable per-agent object store** (S3-compatible mirror planned)
+  holding the EventLog snapshot, namespace store snapshots, and
+  per-version manifests.
+- **`AgentStateExtension` contract** stores the latest state-root
+  pointer for each agent and tracks `activeRuntime` (which
   server's wallet is currently authorised to write). NFT transfer
   resets `activeRuntime` to the new owner — no stale runtime can keep
   writing.
@@ -221,7 +218,7 @@ that pin the canonical encoding live in
 
 | Layer | Knows about | Doesn't know about |
 |---|---|---|
-| `nexus_core` (SDK) | BSC web3, Greenfield REST + JS, append-only logs, contract spec parsing, LLM provider abstraction | agents, users, HTTP, JWT |
+| `nexus_core` (SDK) | BSC web3, append-only logs, contract spec parsing, LLM provider abstraction | agents, users, HTTP, JWT |
 | `nexus` (framework) | DigitalTwin lifecycle, 9-step chat flow, evolution scheduling, projection mode | HTTP, JWT, multi-tenancy |
 | `nexus_server` | FastAPI routes, WebAuthn passkeys, one twin per user, view-shape APIs | how chat works inside a turn (delegated to `twin.chat()`) |
 | `RuneDesktop.*` | Avalonia views, view models, JWT lifetime | persistence (server is the source of truth) |
@@ -277,7 +274,7 @@ PyInstaller + Tauri, auto-installs the resulting `.app` into
 [`ENGINEERING_STANDARDS.md`](ENGINEERING_STANDARDS.md) §1 — there are no
 "step 2: manually run X" instructions by design.
 
-For a fully on-chain setup (BSC testnet + Greenfield), see
+For a fully on-chain setup (BSC testnet), see
 [`docs/concepts/modes.md`](docs/concepts/modes.md).
 
 The legacy `demo/` folder has been retired — the per-package test suites

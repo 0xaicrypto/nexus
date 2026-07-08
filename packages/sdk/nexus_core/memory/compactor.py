@@ -2,7 +2,7 @@
 
 Periodically projects recent events into CuratedMemory when the event log
 grows beyond a threshold. The projection result is appended to the EventLog
-as a `memory_compact` event (immutable, syncs to Greenfield).
+as a `memory_compact` event (immutable, persisted with the log).
 
 The projection function is injected — SDK doesn't depend on LLM.
 
@@ -41,7 +41,7 @@ class EventLogCompactor:
       - event log trajectory exceeds char_threshold * 0.8
 
     Projection result is appended to EventLog as a `memory_compact` event,
-    ensuring it syncs to Greenfield with everything else.
+    ensuring it persists with everything else.
     """
 
     def __init__(
@@ -88,7 +88,7 @@ class EventLogCompactor:
             if not projection:
                 return False
 
-            # 1. Append projection to EventLog (immutable, syncs to Greenfield)
+            # 1. Append projection to EventLog (immutable, persisted with the log)
             self._log.append(
                 "memory_compact",
                 projection,

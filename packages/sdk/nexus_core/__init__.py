@@ -8,7 +8,7 @@ Quick start::
     import nexus_core
 
     rt = nexus_core.local()                          # Zero config (file-backed)
-    rt = nexus_core.testnet(private_key="0x...")     # BSC testnet + Greenfield
+    rt = nexus_core.testnet(private_key="0x...")     # BSC testnet anchoring
     rt = nexus_core.builder().mock_backend().build() # Unit tests / custom config
 
 Architecture:
@@ -31,7 +31,7 @@ Architecture:
 
   Backends (Strategy implementations):
     - LocalBackend       — file-based (dev/demo)
-    - ChainBackend       — BSC + Greenfield (production)
+    - ChainBackend       — local store + BSC anchoring (production)
     - MockBackend        — in-memory (unit tests)
 
   Framework adapters:
@@ -97,7 +97,6 @@ from .social.graph import SocialGraph
 
 # ── Infrastructure (used by ChainBackend) ──────────────────────────────
 from .state import StateManager, ERC8004Identity, AgentStateRecord
-from .greenfield import GreenfieldClient
 
 # ── Generic LLM utilities ──────────────────────────────────────────────
 # Reusable file-distillation pipeline (formerly server-only).
@@ -118,7 +117,7 @@ except ImportError:
 # a2a_task_store + a2a depend on the optional a2a-sdk package (declared
 # in pyproject as the ``a2a`` extra). Importing them unconditionally
 # made the WHOLE SDK unimportable when a2a-sdk wasn't installed —
-# chain.py / greenfield.py couldn't even load. Treat the a2a layer as
+# chain.py couldn't even load. Treat the a2a layer as
 # best-effort: callers that actually need it import directly from the
 # adapter module and get a clean ImportError; everyone else still gets
 # a working ``nexus_core`` package.
@@ -251,7 +250,6 @@ __all__ = [
     "ERC8004Identity",
     "AgentStateRecord",
     "BSCClient",
-    "GreenfieldClient",
     # A2A
     "BNBChainTaskStore",
     "StatelessA2AAgent",

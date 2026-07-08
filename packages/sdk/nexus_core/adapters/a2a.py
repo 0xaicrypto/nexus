@@ -24,7 +24,7 @@ wrapper that simulates this boundary.
            │                          Chain (shared)
            │ A2A                     ┌──────────────┐
            ▼                         │ BSC          │
-    ┌─────────────────────┐         │ + Greenfield │
+    ┌─────────────────────┐         │  anchoring   │
     │  Runtime-3 (server) │         └──────────────┘
     │  ┌───────────────┐  │
     │  │  Risk Assessor│  │
@@ -265,7 +265,7 @@ class A2ARuntime:
         self.runtime_id = runtime_id
         self.config = agent_config
         # Each runtime has its own StateManager instance
-        # (in production: its own web3 connection + Greenfield client)
+        # (in production: its own web3 connection)
         self.state_manager = state_manager or StateManager(base_dir=state_dir)
         self.agent = StatelessA2AAgent(
             config=agent_config,

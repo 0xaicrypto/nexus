@@ -241,7 +241,7 @@ class GossipMessage:
     A single message in a gossip session.
 
     Each message is independently stored. Supports both sync (in-memory)
-    and async (Greenfield-backed) transport.
+    and async (backend-persisted) transport.
 
     Privacy: gossip content must NOT contain private user data.
     Agents discuss interests, knowledge, and perspectives — not personal details.
@@ -295,7 +295,7 @@ class GossipSession:
 
     Transport modes:
       - sync:  messages stay in memory, no chain persistence (fast, ephemeral)
-      - async: messages stored on Greenfield, hash-anchored (persistent, verifiable)
+      - async: messages stored via the backend, hash-anchored (persistent, verifiable)
 
     The mode is chosen at session creation. sync mode is ideal when
     both agents are online simultaneously and don't need persistence.
@@ -314,7 +314,7 @@ class GossipSession:
 
     messages: list = field(default_factory=list)  # list[GossipMessage]
 
-    # Transport mode: "sync" (in-memory only) or "async" (Greenfield-backed)
+    # Transport mode: "sync" (in-memory only) or "async" (backend-persisted)
     transport: str = "sync"
 
     # Post-gossip outputs (set after session concludes)

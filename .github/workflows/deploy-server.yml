@@ -157,7 +157,7 @@ jobs:
             ${{ steps.image.outputs.full_sha }}
             ${{ steps.image.outputs.full_latest }}
           # Layer cache backed by GHCR — first build of the day pays the
-          # full ~17min pip-install + ~1min npm-ci tax; subsequent ones
+          # full ~17min pip-install tax; subsequent ones
           # reuse layers and finish in a couple minutes.
           cache-from: type=registry,ref=${{ steps.image.outputs.image }}:buildcache
           cache-to:   type=registry,ref=${{ steps.image.outputs.image }}:buildcache,mode=max
@@ -191,13 +191,13 @@ jobs:
           docker rm -f nexus-ci || true
           exit 1
 
-      - name: In-container smoke (catches ABI / Node / npm wiring drift)
+      - name: In-container smoke (catches ABI / packaging drift)
         run: |
           set -e
           # Re-uses the same script the host smoke job ran, but THIS
           # time inside the actual built image — so we'd catch a
-          # regression where the wheel was missing ABI files, NODE_PATH
-          # was unset, or the Greenfield SDK install got skipped.
+          # regression where the wheel was missing ABI files or other
+          # packaging wiring drifted.
           docker exec -e SMOKE_IN_DOCKER=1 nexus-ci \
             python /app/scripts/ci/smoke_test.py
 

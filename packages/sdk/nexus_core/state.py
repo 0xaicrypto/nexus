@@ -11,7 +11,7 @@ Architecture mirrors three separate smart contracts on BSC:
 
   2. AgentStateExtension.sol (NEW, our contract)
      - Extends ERC-8004 by agentId (foreign key to ERC-721 tokenId)
-     - state_root: bytes32 hash pointing to Greenfield
+     - state_root: bytes32 hash pointing to the off-chain payload
      - active_runtime: address of current executor
      - Scope: stateless agent checkpoint/resume infrastructure.
 
@@ -22,18 +22,14 @@ Architecture mirrors three separate smart contracts on BSC:
 
 Storage layer:
   - BSC (contracts above): lightweight metadata + hash pointers (~200-300 bytes/agent)
-  - Greenfield / IPFS: full payloads (sessions, messages, artifacts, 1KB-10MB)
-  - Linked by SHA-256 content hashes: BSC stores the hash, Greenfield stores the data
+  - Local object store: full payloads (sessions, messages, artifacts, 1KB-10MB)
+  - Linked by SHA-256 content hashes: BSC stores the hash, the object
+    store keeps the data
 
-Phase 1: Local files (no deployment needed)
-Phase 2: Real web3.py + Greenfield SDK
-
-Both phases expose the SAME API — zero changes to session.py, artifact.py,
+Both modes expose the SAME API — zero changes to session.py, artifact.py,
 a2a_adapter.py, or any demo code.
 """
 
-import asyncio
-import concurrent.futures
 import hashlib
 import json
 import logging
@@ -50,11 +46,6 @@ def _agent_id_to_int(agent_id: str) -> int:
     """Convert a string agent_id to a deterministic uint256 for on-chain calls."""
     from .utils import agent_id_to_int
     return agent_id_to_int(agent_id)
-
-
-# Shared thread pool for running async Greenfield ops from sync code.
-# One worker is enough — Greenfield calls are sequential subprocess invocations.
-_GF_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="rune-gf")
 
 
 # ── Data Models (mirror on-chain structs) ────────────────────────────
@@ -89,14 +80,14 @@ class AgentStateRecord:
     Uses agent_id as foreign key to ERC-8004 tokenId.
 
     On-chain footprint: ~84 bytes per agent.
-      - state_root:      bytes32 (32B) — SHA-256 hash → Greenfield payload
+      - state_root:      bytes32 (32B) — SHA-256 hash → off-chain payload
       - active_runtime:  address (20B) — which runtime currently holds execution
       - updated_at:      uint256 (32B) — block timestamp
     """
     agent_id: str              # FK to ERC-8004 tokenId
     agent_address: str = ""    # Deterministic on-chain address (from ERC-8004)
-    state_root: str = ""       # SHA-256 hash pointing to Greenfield
-    memory_root: str = ""      # SHA-256 hash → Greenfield memory index
+    state_root: str = ""       # SHA-256 hash pointing to stored payload
+    memory_root: str = ""      # SHA-256 hash → memory index payload
     active_runtime: str = ""   # address of current executing runtime
     updated_at: float = 0.0
 
@@ -112,7 +103,7 @@ class TaskRecord:
     On-chain footprint: ~129 bytes per task update.
       - task_id:     bytes32 (32B)
       - agent_id:    bytes32 (32B) — FK to ERC-8004
-      - state_hash:  bytes32 (32B) — SHA-256 hash → Greenfield snapshot
+      - state_hash:  bytes32 (32B) — SHA-256 hash → stored snapshot
       - version:     uint256 (32B) — monotonic counter for optimistic concurrency
       - status:      uint8   (1B)  — 0=pending, 1=running, 2=completed, 3=failed
     """
@@ -133,8 +124,8 @@ class StateManager:
     Unified interface to Nexus state layer.
 
     Two modes:
-      - "local" (Phase 1): File-based mock for development/testing
-      - "chain" (Phase 2): Real web3.py + Greenfield
+      - "local": File-based mock for development/testing
+      - "chain": Real web3.py against the deployed BSC contracts
 
     Mode is auto-detected based on constructor args:
       - StateManager()                           → local mode
@@ -146,23 +137,24 @@ class StateManager:
             task_manager_address="0x...",
         )
 
+    Bulk payloads are stored in a local content-addressed object store
+    (``{base_dir}/data``) in both modes; only the hash pointers differ
+    (local JSON files vs. on-chain contracts).
+
     The public API is identical in both modes — all code above this
     layer (session.py, artifact.py, a2a_adapter.py) works without changes.
     """
 
     def __init__(
         self,
-        # Local mode (Phase 1)
+        # Local mode
         base_dir: str = ".nexus_state",
-        # Chain mode (Phase 2) — if any of these are set, uses real chain
+        # Chain mode — if any of these are set, uses real chain
         rpc_url: Optional[str] = None,
         private_key: Optional[str] = None,
         agent_state_address: Optional[str] = None,
         task_manager_address: Optional[str] = None,
         identity_registry_address: Optional[str] = None,
-        greenfield_private_key: Optional[str] = None,
-        greenfield_bucket: str = "nexus-agent-state",
-        greenfield_network: str = "testnet",
         network: str = "bsc_testnet",
         # Explicit mode override: "local" forces file-based, "chain" forces on-chain,
         # None (default) auto-detects from constructor args + env vars.
@@ -197,9 +189,6 @@ class StateManager:
             identity_registry_address
             or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY")
         )
-        greenfield_private_key = (
-            greenfield_private_key or os.environ.get("NEXUS_GREENFIELD_KEY")
-        )
 
         # Determine mode: explicit override > auto-detect from args/env
         if mode == "local":
@@ -217,26 +206,21 @@ class StateManager:
                 agent_state_address=agent_state_address,
                 task_manager_address=task_manager_address,
                 identity_registry_address=identity_registry_address,
-                greenfield_private_key=greenfield_private_key,
-                greenfield_bucket=greenfield_bucket,
-                greenfield_network=greenfield_network,
                 network=network,
             )
         else:
             self._mode = "local"
-            self._init_local_mode(base_dir, greenfield_bucket)
+            self._init_local_mode(base_dir)
 
-        # agent_id → agent_address mapping (for Greenfield folder names)
+        # agent_id → agent_address mapping (for storage folder names)
         self._address_map: dict[str, str] = {}
 
         logger.info("StateManager initialized in %s mode", self._mode)
 
     # ── Initialization ───────────────────────────────────────────────
 
-    def _init_local_mode(self, base_dir: str, bucket: str):
-        """Phase 1: File-based mock."""
-        from .greenfield import GreenfieldClient
-
+    def _init_local_mode(self, base_dir: str):
+        """File-based mock of the three contracts."""
         self.base_dir = Path(base_dir)
         self.chain_dir = self.base_dir / "chain"
         self.data_dir = self.base_dir / "data"
@@ -255,8 +239,6 @@ class StateManager:
         if not self._tasks_file.exists():
             self._write_file(self._tasks_file, {"tasks": {}})
 
-        # Greenfield client in local mode
-        self.greenfield = GreenfieldClient(local_dir=str(self.data_dir))
         self._chain_client = None
 
     def _init_chain_mode(
@@ -266,14 +248,10 @@ class StateManager:
         agent_state_address: str,
         task_manager_address: Optional[str],
         identity_registry_address: Optional[str],
-        greenfield_private_key: Optional[str],
-        greenfield_bucket: str,
-        greenfield_network: str,
         network: str,
     ):
-        """Phase 2: Real web3.py + Greenfield."""
+        """Real web3.py against the deployed BSC contracts."""
         from .chain import BSCClient
-        from .greenfield import GreenfieldClient
 
         self._chain_client = BSCClient(
             rpc_url=rpc_url,
@@ -284,26 +262,9 @@ class StateManager:
             network=network,
         )
 
-        # Greenfield: use real SDK if key provided, else local fallback
-        gf_key = greenfield_private_key or private_key
-        if gf_key and greenfield_network:
-            try:
-                self.greenfield = GreenfieldClient(
-                    private_key=gf_key,
-                    bucket_name=greenfield_bucket,
-                    network=greenfield_network,
-                )
-            except ImportError:
-                logger.warning(
-                    "greenfield-python-sdk not installed, falling back to local storage"
-                )
-                self.data_dir = Path(".nexus_state") / "data"
-                self.data_dir.mkdir(parents=True, exist_ok=True)
-                self.greenfield = GreenfieldClient(local_dir=str(self.data_dir))
-        else:
-            self.data_dir = Path(".nexus_state") / "data"
-            self.data_dir.mkdir(parents=True, exist_ok=True)
-            self.greenfield = GreenfieldClient(local_dir=str(self.data_dir))
+        # Bulk payloads live in the local object store in chain mode too.
+        self.data_dir = Path(".nexus_state") / "data"
+        self.data_dir.mkdir(parents=True, exist_ok=True)
 
     # ── File I/O helpers (local mode only) ───────────────────────────
 
@@ -441,7 +402,7 @@ class StateManager:
             agent_id: ERC-8004 tokenId.
             owner: Owner wallet address.
             agent_address: Deterministic on-chain agent address from ERC-8004.
-                Used as the Greenfield folder name (instead of tokenId).
+                Used as the storage folder name (instead of tokenId).
 
         In production these are two separate transactions:
           1. Verify ERC-8004 NFT exists (or mint it externally)
@@ -518,7 +479,7 @@ class StateManager:
         Update the state root hash on AgentStateExtension.
 
         In production: AgentStateExtension.updateStateRoot(agentId, stateRoot, runtime)
-        This is the critical write that links BSC → Greenfield.
+        This is the critical write that links BSC to the stored payload.
         """
         if self._mode == "chain":
             # Convert hex string to bytes32
@@ -734,36 +695,36 @@ class StateManager:
         return hashlib.sha256(task_id.encode()).digest()
 
     # ══════════════════════════════════════════════════════════════════
-    # Greenfield / IPFS (off-chain data layer)
+    # Object store (off-chain data layer)
     # ══════════════════════════════════════════════════════════════════
 
     @staticmethod
     def _content_hash(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
-    # ── Greenfield path helpers ──────────────────────────────────────
+    # ── Storage path helpers ─────────────────────────────────────────
 
     def set_agent_address(self, agent_id: str, agent_address: str) -> None:
         """
         Register the on-chain address for an agent ID.
 
-        Once set, all Greenfield paths for this agent will use
+        Once set, all storage paths for this agent will use
         ``{address}/{tokenId}`` as the folder name. This keeps
-        agents browsable by owner address in DCellar while
-        preserving per-agent isolation (multiple agents can share
-        the same owner address).
+        agents browsable by owner address while preserving
+        per-agent isolation (multiple agents can share the same
+        owner address).
         """
         if agent_address:
             self._address_map[agent_id] = agent_address
 
     def agent_folder(self, agent_id: str) -> str:
         """
-        Resolve the Greenfield folder name for an agent.
+        Resolve the storage folder name for an agent.
 
         Returns ``{address}/{tokenId}`` if an on-chain address is
         registered, otherwise falls back to ``{agent_id}`` (local mode).
 
-        Layout in DCellar:
+        Layout:
             rune/agents/{ownerAddress}/{tokenId}/sessions/...
             rune/agents/{ownerAddress}/{tokenId}/artifacts/...
         """
@@ -773,7 +734,7 @@ class StateManager:
         return agent_id
 
     @staticmethod
-    def greenfield_path(
+    def storage_path(
         agent_id: str,
         category: str,
         content_hash: str,
@@ -782,9 +743,9 @@ class StateManager:
         filename: str = "",
     ) -> str:
         """
-        Build a structured Greenfield object path.
+        Build a structured object-store path.
 
-        Layout on Greenfield / DCellar:
+        Layout:
             rune/agents/{ownerAddress}/{tokenId}/state/{hash}.json
             rune/agents/{ownerAddress}/{tokenId}/sessions/{sessionId}/{hash}.json
             rune/agents/{ownerAddress}/{tokenId}/tasks/{taskId}/{hash}.json
@@ -807,58 +768,28 @@ class StateManager:
             return f"{base}/{filename}"
         return f"{base}/{content_hash}.json"
 
-    def _run_greenfield_async(self, coro):
-        """
-        Run an async Greenfield coroutine from synchronous code.
-
-        Handles two cases:
-          - No running event loop: uses ``asyncio.run()`` directly.
-          - Event loop already running (e.g. inside ADK Runner): offloads
-            to the shared thread pool so ``asyncio.run()`` gets a fresh
-            loop in the worker thread.  The calling coroutine is NOT
-            blocked because ADK yields before reading the result.
-
-        This avoids the ``RuntimeError: cannot call asyncio.run() while
-        another loop is running`` that occurs when sync helpers are
-        invoked from async ADK code paths.
-        """
-        try:
-            asyncio.get_running_loop()
-            # Loop is running — offload to a worker thread with its own loop.
-            future = _GF_EXECUTOR.submit(asyncio.run, coro)
-            return future.result(timeout=180)
-        except RuntimeError:
-            # No running loop — safe to create one.
-            return asyncio.run(coro)
-
     def store_data(self, data: bytes, object_path: str = "") -> str:
         """
-        Store raw bytes in Greenfield; return content hash.
+        Store raw bytes in the object store; return content hash.
 
         Args:
             data: Raw bytes to store.
-            object_path: Optional structured Greenfield path. Built via
-                ``StateManager.greenfield_path()``. If empty, uses the
-                legacy flat ``rune/{hash}`` naming.
+            object_path: Optional structured path. Built via
+                ``StateManager.storage_path()``. If empty, uses the
+                flat content-hash naming.
         """
-        if self._mode == "chain" and self.greenfield.mode == "greenfield":
-            return self._run_greenfield_async(
-                self.greenfield.put(data, object_path=object_path or None)
-            )
-
-        # Local mode (sync)
         content_hash = self._content_hash(data)
-        path = self.greenfield._local_dir / content_hash
+        path = self.data_dir / content_hash
         if not path.exists():
             tmp = path.with_suffix(".tmp")
             with open(tmp, "wb") as f:
                 f.write(data)
             tmp.rename(path)
-            print(f"  [Greenfield] Stored {len(data)} bytes -> {content_hash[:16]}...")
+            print(f"  [Store] Stored {len(data)} bytes -> {content_hash[:16]}...")
 
-        # Also store at structured path for browsability (local mode)
+        # Also store at structured path for browsability
         if object_path:
-            structured = self.greenfield._local_dir / object_path
+            structured = self.data_dir / object_path
             structured.parent.mkdir(parents=True, exist_ok=True)
             if not structured.exists():
                 try:
@@ -871,41 +802,36 @@ class StateManager:
 
     def load_data(self, content_hash: str, object_path: str = "") -> Optional[bytes]:
         """
-        Load raw bytes from Greenfield by content hash.
+        Load raw bytes from the object store by content hash.
 
         Args:
             content_hash: SHA-256 hex hash of the object.
             object_path: Optional structured path (tries this first).
         """
-        if self._mode == "chain" and self.greenfield.mode == "greenfield":
-            return self._run_greenfield_async(
-                self.greenfield.get(content_hash, object_path=object_path or None)
-            )
-
-        # Local mode (sync) — try structured path first, then canonical
+        # Try structured path first, then canonical
         if object_path:
-            structured = self.greenfield._local_dir / object_path
+            structured = self.data_dir / object_path
             if structured.exists():
                 with open(structured, "rb") as f:
                     data = f.read()
-                print(f"  [Greenfield] Loaded {len(data)} bytes <- {object_path}")
+                print(f"  [Store] Loaded {len(data)} bytes <- {object_path}")
                 return data
 
-        path = self.greenfield._local_dir / content_hash
+        path = self.data_dir / content_hash
         if not path.exists():
             return None
         with open(path, "rb") as f:
             data = f.read()
-        print(f"  [Greenfield] Loaded {len(data)} bytes <- {content_hash[:16]}...")
+        print(f"  [Store] Loaded {len(data)} bytes <- {content_hash[:16]}...")
         return data
 
     def store_json(self, obj: Any, object_path: str = "") -> str:
-        """Convenience: serialize to JSON, store in Greenfield, return hash."""
+        """Convenience: serialize to JSON, store, return hash."""
         data = json.dumps(obj, default=str, sort_keys=True).encode("utf-8")
         return self.store_data(data, object_path=object_path)
 
     def load_json(self, content_hash: str, object_path: str = "") -> Optional[Any]:
-        """Convenience: load from Greenfield by hash, deserialize from JSON."""
+        """Convenience: load by hash, deserialize from JSON."""
         data = self.load_data(content_hash, object_path=object_path)
         if data is None:
             return None
@@ -913,7 +839,7 @@ class StateManager:
 
     def list_agent_objects(self, agent_id: str, category: str = "") -> list[dict]:
         """
-        List all Greenfield objects for an agent.
+        List all stored objects for an agent.
 
         Args:
             agent_id: The agent's ERC-8004 ID (resolves to address if known).
@@ -928,11 +854,19 @@ class StateManager:
         if category:
             prefix += f"{category}/"
 
-        if self._mode == "chain" and self.greenfield.mode == "greenfield":
-            return self._run_greenfield_async(self.greenfield.list_objects(prefix))
-
-        # Local mode
-        return self.greenfield._list_local(prefix)
+        results: list[dict] = []
+        base = self.data_dir / prefix
+        if not base.exists():
+            return results
+        for p in sorted(base.rglob("*")):
+            if p.is_file():
+                rel = p.relative_to(self.data_dir)
+                results.append({
+                    "key": str(rel),
+                    "size": p.stat().st_size,
+                    "modified": p.stat().st_mtime,
+                })
+        return results
 
     # ── Diagnostics ──────────────────────────────────────────────────
 
@@ -940,7 +874,7 @@ class StateManager:
         """Get current configuration and connection status."""
         result = {
             "mode": self._mode,
-            "greenfield_mode": self.greenfield.mode,
+            "data_dir": str(self.data_dir),
         }
         if self._chain_client:
             result["chain"] = self._chain_client.connection_info()

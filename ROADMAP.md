@@ -52,7 +52,7 @@ Done:
 
 Still to do (heavier refactor, deferred):
 - Submodule reorg of `nexus_core/`: split monolithic ``chain.py`` /
-  ``greenfield.py`` / ``state.py`` into ``chain/``, ``greenfield/``,
+  ``state.py`` into ``chain/``,
   ``memory/``, ``contracts/``, ``runtime/``, ``llm/``, ``tools/``,
   ``distill/``. README per submodule. Holds until the class-rename
   decisions in Phase F land — splitting + renaming together is
@@ -63,8 +63,10 @@ Still to do (heavier refactor, deferred):
 Done:
 - Logger namespace `rune.*` → `nexus_core.*`. All ``getLogger("rune.X")``
   call sites were updated.
-- Greenfield bucket prefix `rune-agent-{token_id}` →
-  `nexus-agent-{token_id}`. The legacy shared default
+- Object-storage bucket prefix `rune-agent-{token_id}` →
+  `nexus-agent-{token_id}` (historical; the decentralised
+  object-storage data plane has since been removed entirely).
+  The legacy shared default
   ``rune-agent-state`` was also renamed in keystore.py / state.py /
   cli.py / web_demo.py / scripts; pre-existing testnet buckets
   abandoned (test phase, no real user data).
@@ -78,8 +80,7 @@ Class renames are now done in Phase H — see below.
   `NEXUS_TESTNET_AGENT_STATE_ADDRESS` /
   `NEXUS_TESTNET_TASK_MANAGER_ADDRESS` /
   `NEXUS_TESTNET_IDENTITY_REGISTRY` (and mainnet equivalents),
-  `NEXUS_PRIVATE_KEY`, `NEXUS_GREENFIELD_BUCKET` /
-  `NEXUS_GREENFIELD_KEY` / `NEXUS_GREENFIELD_NETWORK`,
+  `NEXUS_PRIVATE_KEY`,
   `NEXUS_USE_TWIN`, `NEXUS_TWIN_BASE_DIR`,
   `NEXUS_TWIN_IDLE_SECONDS`, `NEXUS_DISABLE_TWIN_REAPER`,
   `NEXUS_CACHE_DIR`, `NEXUS_MAX_ATTACHMENT_BYTES`,
@@ -124,7 +125,7 @@ Detailed design lives in [`docs/design/nexus-architecture.md`](docs/design/nexus
 Summary:
 
 - **I.** Monolith decomposition (`twin.py`, `state.py`,
-  `greenfield.py`, `chain.py`, `twin_manager.py`, `llm_gateway.py`
+  `chain.py`, `twin_manager.py`, `llm_gateway.py`
   → per-responsibility submodules with re-export shims).
 - **J.** 5-namespace curated memory taxonomy (`facts/`, `episodes/`,
   `skills/`, `persona/`, `knowledge/`) + persona versioning

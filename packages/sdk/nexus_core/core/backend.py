@@ -5,7 +5,7 @@ Defines HOW data is stored and retrieved. Each backend implements
 the same interface but with different storage engines:
 
     LocalBackend  — file-based, zero config, for development
-    ChainBackend  — BSC + Greenfield, for production
+    ChainBackend  — local store + BSC anchoring, for production
     MockBackend   — in-memory, for unit tests
 
 Providers (SessionProvider, MemoryProvider, etc.) depend on this

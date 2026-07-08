@@ -306,7 +306,7 @@ def delete_session_row(user_id: str, session_id: str) -> bool:
 
     Counterpart to :func:`archive_session`'s soft delete. The actual
     message rows live in twin's per-user EventLog; the server-side
-    twin.delete_session call wipes them and (best-effort) Greenfield
+    twin.delete_session call wipes them and (best-effort) any stored
     objects. This function only owns the metadata row — call it AFTER
     twin.delete_session so the audit trail (the ``session_deleted``
     event we wrote into event_log) stays linkable to the session id

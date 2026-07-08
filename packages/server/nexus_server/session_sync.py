@@ -9,7 +9,7 @@ Why this module exists
 Before this module, the only place the server knew that ``session_16fa``
 was titled "BSC 调试" was the local SQLite ``nexus_sessions`` table.
 The chat content of that session was already durable — it lives in
-twin's EventLog, which mirrors to Greenfield + anchors on BSC. But the
+twin's EventLog, which anchors on BSC. But the
 **human-friendly metadata** (title, archived flag) was server-local.
 
 So restoring from backup / migrating to a new VPS / wiping the SQL
@@ -33,7 +33,7 @@ twin's EventLog with this metadata schema::
 Any ``None`` field means "not changed by this event". Replay applies
 events oldest-first; last-write-wins per ``session_id``.
 
-EventLog already does Greenfield mirror + BSC state-root anchor on
+EventLog already does a backend snapshot + BSC state-root anchor on
 compaction, so these metadata events ride the same durability path as
 chat messages — no new sync infrastructure.
 

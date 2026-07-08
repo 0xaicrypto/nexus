@@ -110,7 +110,7 @@ sqlite3 ~/.nexus_server/twins/$UID/event_log/user-${UID:0:8}.db \
   `nexus_server.db` from a previous run; `rm nexus_server.db` and
   restart (or set `DATABASE_URL` to a fresh path).
 * **Chain operations failing silently** — check `nexus_server.log`
-  for `nexus_core.backend.chain` / `nexus_core.greenfield`
+  for `nexus_core.backend.chain`
   warnings; chain writes fall back gracefully if
   `SERVER_PRIVATE_KEY` isn't set.
 

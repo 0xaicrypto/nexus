@@ -3,20 +3,20 @@ BNBChainTaskStore — A2A-compatible TaskStore backed by on-chain state.
 
 This is the bridge between the A2A protocol and BNBChain:
   - A2A SDK calls save()/get()/delete() on Task objects
-  - We serialize the full Task to Greenfield (bulk data)
+  - We serialize the full Task to the object store (bulk data)
   - We store the task_id, status, and state_hash on BSC (TaskStateManager)
 
 Write architecture (respects FlushPolicy):
   - Task creation (createTask):         Always sync to BSC (critical)
   - Terminal states (completed/failed): Always sync to BSC (critical)
-  - Interim updates (working):          Greenfield only (batched, BSC deferred)
+  - Interim updates (working):          object store only (batched, BSC deferred)
 
   When sync_task_transitions=True (default), any status change triggers
   a BSC write.  Set to False to only sync on explicit flush().
 
 On-chain mapping:
   BSC (TaskStateManager):  task_id, agent_id, status.state, state_hash, version
-  Greenfield:              full serialized Task JSON (addressed by state_hash)
+  Object store:            full serialized Task JSON (addressed by state_hash)
 """
 
 import json
@@ -42,12 +42,12 @@ class BNBChainTaskStore(TaskStore):
     A2A TaskStore implementation backed by BNBChain state layer.
 
     Every A2A Task is persisted as:
-      1. Full Task JSON → Greenfield (content-hash addressed)
+      1. Full Task JSON → object store (content-hash addressed)
       2. task_id + state + hash → BSC TaskStateManager contract
 
     With FlushPolicy:
       - Critical writes (create, terminal states) always go to BSC
-      - Interim writes (working/input_required) go to Greenfield only
+      - Interim writes (working/input_required) go to the object store only
         unless sync_task_transitions=True or sync_every policy is active
     """
 
@@ -64,7 +64,7 @@ class BNBChainTaskStore(TaskStore):
         self._versions: dict[str, int] = {}
         # Track last synced status to detect transitions
         self._last_synced_status: dict[str, str] = {}
-        # Greenfield-only buffer: tasks with Greenfield data but no BSC update yet
+        # Store-only buffer: tasks with stored data but no BSC update yet
         self._pending_bsc: dict[str, str] = {}  # task_id → latest content_hash
 
     @property
@@ -148,14 +148,14 @@ class BNBChainTaskStore(TaskStore):
 
     def _extract_artifacts(self, task: Task) -> None:
         """
-        Extract A2A task artifacts and store each as a separate Greenfield object.
+        Extract A2A task artifacts and store each as a separate object.
 
         A2A artifacts live inside the Task JSON blob, but for browsability
         (DCellar, CLI) we also store each artifact as an individual file at:
             rune/agents/{agentId}/artifacts/{filename}
 
         This runs on terminal states (completed/failed) so each artifact
-        gets its own readable path on Greenfield.
+        gets its own readable storage path.
         """
         if not task.artifacts:
             return
@@ -186,7 +186,7 @@ class BNBChainTaskStore(TaskStore):
 
             data = b"\n".join(parts_data)
             folder = self._state.agent_folder(self._agent_id)
-            obj_path = self._state.greenfield_path(
+            obj_path = self._state.storage_path(
                 folder, "artifacts", "",
                 filename=art_name,
             )
@@ -200,19 +200,19 @@ class BNBChainTaskStore(TaskStore):
         Save or update an A2A Task.
 
         Flow (with default policy):
-          1. Always: serialize Task → Greenfield → content_hash
+          1. Always: serialize Task → object store → content_hash
           2. If critical (new/terminal/transition): write to BSC immediately
           3. If interim: defer BSC write (content_hash buffered for later flush)
-          4. On terminal states: extract artifacts as individual Greenfield objects
+          4. On terminal states: extract artifacts as individual stored objects
         """
-        # Step 1: Always persist full task data to Greenfield
+        # Step 1: Always persist full task data to the object store
         task_data = self._serialize_task(task)
         # Serialize once, hash once, store raw bytes (avoids double-serialization).
         data_bytes = json.dumps(task_data, default=str, sort_keys=True).encode("utf-8")
         import hashlib
         chash = hashlib.sha256(data_bytes).hexdigest()
         folder = self._state.agent_folder(self._agent_id)
-        obj_path = self._state.greenfield_path(
+        obj_path = self._state.storage_path(
             folder, "tasks", chash, sub_key=task.id,
         )
         content_hash = self._state.store_data(data_bytes, object_path=obj_path)
@@ -243,7 +243,7 @@ class BNBChainTaskStore(TaskStore):
             print(f"      💾 [SYNC] BSC  ← updateTask({tid_short}…) status={chain_status} v{record.version}")
             print(f"      💾 [SYNC] GF   ← {content_hash[:16]}… ({len(json.dumps(task_data))} bytes)")
         else:
-            # Defer BSC write — Greenfield has the latest data
+            # Defer BSC write — the object store has the latest data
             self._pending_bsc[task.id] = content_hash
             self._last_synced_status[task.id] = chain_status
             print(f"      💾 [DEFER] GF  ← {content_hash[:16]}… (BSC deferred, status={chain_status})")
@@ -258,9 +258,9 @@ class BNBChainTaskStore(TaskStore):
         """
         Load an A2A Task from chain.
 
-        Checks pending (Greenfield-only) data first, then falls back to BSC.
+        Checks pending (store-only) data first, then falls back to BSC.
         """
-        # Check if we have a newer version in Greenfield (deferred BSC write)
+        # Check if we have a newer version in the store (deferred BSC write)
         pending_hash = self._pending_bsc.get(task_id)
         if pending_hash:
             task_data = self._state.load_json(pending_hash)
@@ -274,7 +274,7 @@ class BNBChainTaskStore(TaskStore):
         if record is None or not record.state_hash:
             return None
 
-        # Load full task data from Greenfield
+        # Load full task data from the object store
         task_data = self._state.load_json(record.state_hash)
         if task_data is None:
             return None
@@ -292,7 +292,7 @@ class BNBChainTaskStore(TaskStore):
         """
         Mark a task as deleted on chain.
 
-        Note: Greenfield data is retained (content-hash objects are immutable).
+        Note: stored data is retained (content-hash objects are immutable).
         The BSC record is updated to 'failed' status to indicate deletion.
         """
         record = self._state.get_task(task_id)

@@ -462,7 +462,7 @@ class BSCClient:
 
         Args:
             agent_id: ERC-8004 tokenId
-            state_root: 32-byte SHA-256 hash (content hash → Greenfield)
+            state_root: 32-byte SHA-256 hash (content hash of stored payload)
             runtime: Address of the currently executing runtime
 
         Returns:
@@ -558,7 +558,7 @@ class BSCClient:
 
         Args:
             task_id: 32-byte task identifier
-            state_hash: 32-byte content hash → Greenfield payload
+            state_hash: 32-byte content hash of the stored payload
             status: "pending" | "running" | "completed" | "failed"
             expected_version: Must match current on-chain version
 

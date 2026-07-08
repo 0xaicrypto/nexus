@@ -326,7 +326,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             twin_reaper_task, twin_stop_event = twin_manager.start_reaper()
             # Bug 3: capture SDK chain activity into twin_chain_events
             # so /agent/state and /agent/timeline can surface anchor
-            # successes / Greenfield failures to the desktop sidebar.
+            # successes / failures to the desktop sidebar.
             twin_manager.install_chain_activity_handler()
         except Exception as e:
             logger.warning(

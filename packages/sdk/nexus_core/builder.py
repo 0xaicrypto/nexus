@@ -6,8 +6,8 @@ The 80% case is the four module-level factory functions:
     import nexus_core
 
     rt = nexus_core.local()                          # Zero config, file-backed
-    rt = nexus_core.testnet(private_key="0x...")     # BSC testnet + Greenfield
-    rt = nexus_core.mainnet(private_key="0x...")     # BSC mainnet + Greenfield
+    rt = nexus_core.testnet(private_key="0x...")     # BSC testnet anchoring
+    rt = nexus_core.mainnet(private_key="0x...")     # BSC mainnet anchoring
     rt = nexus_core.builder().mock_backend().build() # Unit tests / custom config
 
 Each returns an :class:`AgentRuntime` — the 5-provider facade
@@ -65,7 +65,7 @@ def local(base_dir: str = ".nexus_state") -> AgentRuntime:
 
 
 def testnet(private_key: str, **kwargs) -> AgentRuntime:
-    """Create a testnet-mode runtime — BSC testnet + Greenfield testnet.
+    """Create a testnet-mode runtime — anchored on BSC testnet.
 
     Requires:
       - BNB testnet tokens (from a faucet).
@@ -75,8 +75,7 @@ def testnet(private_key: str, **kwargs) -> AgentRuntime:
         private_key: BSC wallet private key (0x-prefixed hex).
         **kwargs: Additional :class:`ChainBackend` options
             (``rpc_url``, ``agent_state_address``,
-            ``task_manager_address``, ``identity_registry_address``,
-            ``greenfield_bucket``).
+            ``task_manager_address``, ``identity_registry_address``).
 
     Returns:
         An :class:`AgentRuntime` backed by :class:`ChainBackend`.
@@ -85,7 +84,7 @@ def testnet(private_key: str, **kwargs) -> AgentRuntime:
 
 
 def mainnet(private_key: str, **kwargs) -> AgentRuntime:
-    """Create a mainnet-mode runtime — BSC mainnet + Greenfield mainnet.
+    """Create a mainnet-mode runtime — anchored on BSC mainnet.
 
     Args:
         private_key: BSC wallet private key.
@@ -146,7 +145,7 @@ class Builder:
         return self
 
     def chain_backend(self, private_key: str, network: str = "testnet", **kwargs) -> "Builder":
-        """Use :class:`ChainBackend` (BSC + Greenfield)."""
+        """Use :class:`ChainBackend` (local store + BSC anchoring)."""
         from .backends.chain import ChainBackend
         self._backend = ChainBackend(private_key=private_key, network=network, **kwargs)
         return self

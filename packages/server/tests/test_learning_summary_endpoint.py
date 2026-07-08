@@ -26,9 +26,9 @@ class _FakeBackend:
 
     def chain_health_snapshot(self):
         return {
-            "wal_queue_size": 0, "daemon_alive": True,
-            "last_daemon_ok": None,
-            "greenfield_ready": True, "bsc_ready": True,
+            "bsc_ready": True,
+            "bsc_failure_active": False,
+            "last_bsc_anchor_error": None,
         }
 
     def is_path_mirrored(self, path: str) -> bool:

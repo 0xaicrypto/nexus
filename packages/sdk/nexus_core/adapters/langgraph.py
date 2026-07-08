@@ -52,7 +52,7 @@ class RuneCheckpointer:
         LangGraph graph.invoke()
             → RuneCheckpointer.put(config, checkpoint)
                 → SessionProvider.save_checkpoint()
-                    → Greenfield (full state) + BSC (state root hash)
+                    → object store (full state) + BSC (state root hash)
 
     The checkpoint includes the full graph state at each step,
     enabling:

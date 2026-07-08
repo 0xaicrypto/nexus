@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# start.sh — boot the local nexus_server + greenfield daemon as
+# start.sh — boot the local nexus_server as
 # background processes, wait for healthz, write runtime.json.
 #
 # This is what the desktop calls every launch (after setup.sh has run
@@ -12,7 +12,7 @@
 #   1  setup not done (marker missing)
 #   2  port acquisition failed
 #   3  python server didn't come up within timeout
-#   4  greenfield daemon didn't come up within timeout
+#   4  (reserved — was: helper daemon didn't come up within timeout)
 #   5  already-running stale state was unrecoverable
 #
 # Output on stdout (last line):
@@ -255,19 +255,9 @@ echo "→ launching nexus_server"
 # cwd → $RUNE_HOME so any future relative-path bug in server / deps
 # writes to user data, not the read-only .app bundle.
 cd "$RUNE_HOME"
-# NEXUS_SCRIPTS_DIR points at the bundled greenfield_daemon /
-# create_greenfield_bucket scripts. Without this, nexus_core's
-# _find_script() walks cwd-relative candidates (which all live under
-# $RUNE_HOME → empty) and falls back to "no greenfield helper
-# available" — every Greenfield write goes to local cache, the
-# desktop's chain-health card stays degraded forever, and `ensure_bucket`
-# fails with "create_greenfield_bucket.mjs not found". Pin it so
-# the package install location doesn't matter.
-SCRIPTS_DIR="$REPO_ROOT/packages/sdk/scripts"
 cd "$RUNE_HOME"
 RUNE_HOME_EXPORT="$RUNE_HOME" \
 NEXUS_LOG_DIR="$RUNE_HOME" \
-NEXUS_SCRIPTS_DIR="$SCRIPTS_DIR" \
 NEXUS_ALLOW_ORPHAN_RECOVERY=1 \
 nohup "$SERVER_CMD" \
   --port "$PORT" \
@@ -277,23 +267,10 @@ SERVER_PID=$!
 disown $SERVER_PID
 echo "  server pid: $SERVER_PID"
 
-# ── 5. Spawn the Greenfield daemon ───────────────────────────────────
-# The daemon talks to the server via the same port internally (via stdin
-# JSON-RPC; the server pipe-forks it). For a clean Phase 1 we keep the
-# daemon launch separate so its crash/restart isn't entangled with the
-# Python server's lifecycle. The server will reconnect via its own
-# DaemonClient if the daemon is up — see packages/sdk/.../daemon.py.
-DAEMON_SCRIPT="$REPO_ROOT/packages/sdk/scripts/greenfield_daemon.cjs"
-if [[ -f "$DAEMON_SCRIPT" ]]; then
-  echo "→ launching greenfield_daemon"
-  nohup node "$DAEMON_SCRIPT" > "$LOG_DAEMON" 2>&1 &
-  DAEMON_PID=$!
-  disown $DAEMON_PID
-  echo "  daemon pid: $DAEMON_PID"
-else
-  DAEMON_PID=""
-  echo "  ⚠ greenfield_daemon.cjs not found at $DAEMON_SCRIPT — skipping (server will fall back to in-process Greenfield)"
-fi
+# ── 5. (removed) helper daemon ───────────────────────────────────────
+# The decentralised object-storage daemon was removed along with its
+# data plane; runtime.json keeps a null daemon_pid for shape compat.
+DAEMON_PID=""
 
 # ── 6. Wait for healthz ──────────────────────────────────────────────
 echo -n "→ waiting for healthz "

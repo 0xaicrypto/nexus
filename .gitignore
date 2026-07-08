@@ -64,7 +64,7 @@ TestResults/
 *.coverage
 *.coveragexml
 
-# ─── Node (Greenfield ops scripts under packages/sdk/scripts/) ───────
+# ─── Node ────────────────────────────────────────────────────────────
 node_modules/
 package-lock.json
 yarn.lock
@@ -75,13 +75,6 @@ yarn.lock
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-# Exception: packages/sdk/package-lock.json is the SOURCE OF TRUTH for
-# the Greenfield JS bridge versions used by both local dev AND the
-# Docker image's `npm ci`. Without it committed, the Dockerfile build
-# fails with "package-lock.json missing", and worse — version drift
-# between Mac and Linux silently re-introduces the kind of "v1 vs v2
-# of @bnb-chain/greenfield-js-sdk" bug that broke production once.
-!packages/sdk/package-lock.json
 
 # ─── IDE / editor ────────────────────────────────────────────────────
 .idea/

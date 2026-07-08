@@ -37,7 +37,6 @@ GEMINI_API_KEY=AIza-test-bundled-1234
 TAVILY_API_KEY=tvly-test-key
 NEXUS_RELAY_URL=https://relay.example
 NEXUS_RELAY_API_KEY=relay-key
-NEXUS_GREENFIELD_DISABLED=1
 EOF
 
 # ── Stage 1: build-time refresh (replicates scripts/build-macos.sh §4b)

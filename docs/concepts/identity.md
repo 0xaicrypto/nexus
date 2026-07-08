@@ -10,7 +10,7 @@ difference between "this works" and "I'm in the wrong codepath".
 |---|---|---|---|---|
 | **`user_id`** | UUID string | Server (`/auth/register`) | Per server account | Database keys, JWT subject, server-side scoping |
 | **`agent_id`** | string `"user-{user_id[:8]}"` | Server (`twin_manager._agent_id_for`) | Per twin instance | Local SQLite path, log lines |
-| **`token_id`** | int (ERC-8004 NFT token id) | BSC `IdentityRegistry.register` | Forever, on-chain | Greenfield bucket name, on-chain identity |
+| **`token_id`** | int (ERC-8004 NFT token id) | BSC `IdentityRegistry.register` | Forever, on-chain | On-chain identity |
 
 ## How they connect
 
@@ -42,13 +42,10 @@ difference between "this works" and "I'm in the wrong codepath".
                   TwinManager._create_twin(user_id):
                     ┌──────────────────────────────────────┐
                     │  agent_id = f"user-{user_id[:8]}"    │
-                    │  bucket   = bucket_for_agent(token_id)
-                    │           = f"nexus-agent-{token_id}" │
                     │  base_dir = ~/.nexus_server/twins/{user_id}/
                     │                                      │
                     │  DigitalTwin.create(                 │
                     │      agent_id=agent_id,              │
-                    │      greenfield_bucket=bucket,       │
                     │      cached_agent_id=token_id, …)    │
                     └──────────────────────────────────────┘
 ```
@@ -86,7 +83,6 @@ the boundaries.
 | `nexus_server.db.users.id` | `user_id` (PK) | — |
 | `nexus_server.db.users.chain_agent_id` | `token_id` for a `user_id` | JWT → user_id → SELECT |
 | `nexus_server.db.users.chain_register_tx` | The BSC tx that minted the token | Audit only |
-| Greenfield bucket | Filesystem of objects keyed by `token_id` | `bucket_for_agent(token_id)` |
 | BSC `IdentityRegistry` | The `token_id` ↔ wallet mapping | `BSCClient.agent_exists(token_id)` |
 | BSC `AgentStateExtension` | State-root hashes per `token_id` | `BSCClient.get_state_root(token_id)` |
 | `~/.nexus_server/twins/{user_id}/` | Twin's local files (event log + curated memory) | server-side path |
@@ -113,19 +109,6 @@ a unique match. Used by the chain-activity log handler to attribute
 SDK log lines (`agent=user-22183952`) back to a `user_id` for
 `twin_chain_events` row attribution.
 
-## What `bucket_for_agent` does
-
-```python
-# packages/sdk/nexus_core/utils/agent_id.py
-def bucket_for_agent(token_id: int | str) -> str:
-    """Per-agent Greenfield bucket name."""
-    if token_id is None:
-        raise ValueError("token_id required — no shared bucket fallback")
-    s = str(token_id).strip()
-    if not s:
-        raise ValueError("token_id must be non-empty")
-    return f"nexus-agent-{s}"
-```
 
 The bucket is keyed on `token_id` (the on-chain ID), not `user_id` or
 `agent_id`. Why: the bucket is the **on-chain-verifiable** copy of the
@@ -160,7 +143,7 @@ ensure this transition is atomic.
 
 ## File pointers
 
-- `packages/sdk/nexus_core/utils/agent_id.py` — `bucket_for_agent`
+- `packages/sdk/nexus_core/utils/agent_id.py` — `agent_id_to_int`
 - `packages/sdk/nexus_core/chain/...` — `BSCClient.register_agent`
 - `packages/server/nexus_server/twin_manager.py` — `bootstrap_chain_identity`,
   `_agent_id_for`, `_user_id_for_agent`

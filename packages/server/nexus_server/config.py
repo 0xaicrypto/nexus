@@ -150,22 +150,6 @@ class ServerConfig:
         "NEXUS_MAINNET_IDENTITY_REGISTRY"
     )
 
-    # #134 — Greenfield (BNB Chain decentralised storage) sync toggle.
-    # Default ON-DISABLED while we transition off Greenfield onto a
-    # traditional object-storage backend (S3-compatible) as the
-    # durability layer. When this is "1" / "true" / "yes":
-    #   * files.upload_file skips the store_blob mirror step
-    #   * twin_manager's log handler still tolerates greenfield_put
-    #     events (older sessions may still emit them), but new uploads
-    #     never produce them
-    #   * desktop UI hides the Work-directory bucket-tree panel and
-    #     swaps the sync badge to "Local-only"
-    # Set to "0" only when you need to test the legacy path. Once the
-    # S3 backend lands (separate task), all of this code goes away.
-    NEXUS_GREENFIELD_DISABLED: bool = os.getenv(
-        "NEXUS_GREENFIELD_DISABLED", "1",
-    ).strip().lower() in ("1", "true", "yes", "on")
-
     @property
     def network_short(self) -> str:
         """Short-form network name ("testnet" / "mainnet") that the SDK

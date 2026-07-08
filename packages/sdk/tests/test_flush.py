@@ -191,13 +191,13 @@ class TestFlushBuffer:
     def test_flush_failure_retains_events(self):
         """On flush callback error, events should stay in buffer."""
         def failing_flush(events):
-            raise RuntimeError("Greenfield down")
+            raise RuntimeError("storage down")
 
         policy = FlushPolicy(every_n_events=2, interval_seconds=0, wal_enabled=False)
         buf = FlushBuffer(policy=policy, on_flush=failing_flush)
 
         buf.append({"e": 1})
-        with pytest.raises(RuntimeError, match="Greenfield down"):
+        with pytest.raises(RuntimeError, match="storage down"):
             buf.append({"e": 2})
 
         # Events should still be in buffer for retry

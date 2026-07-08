@@ -39,13 +39,12 @@ explained in terms of what it adds to the layer below.
 │    Memory primitives: EventLog / CuratedMemory / EventLogCompactor   │
 │    Contract primitives: ContractEngine / DriftScore                  │
 │    LLMClient / ToolRegistry / SkillManager / MCPManager              │
-│    BSCClient (web3) / GreenfieldClient (REST + JS daemon)            │
-│    distill() / bucket_for_agent() / utils                            │
+│    BSCClient (web3)                                                  │
+│    distill() / utils                                                 │
 └─────────────────────────┬────────────────────────────────────────────┘
                           │
-                ┌─────────┴─────────┐
-                ▼                   ▼
-            BSC RPC          BNB Greenfield SP
+                          ▼
+                       BSC RPC
 ```
 
 ## Dependency direction
@@ -55,7 +54,7 @@ Imports flow strictly downward. Verified:
 - **SDK** imports from neither Nexus nor Server. (`grep "from nexus\|from nexus_server" packages/sdk/` returns nothing.)
 - **Nexus** imports from SDK only. (`from nexus_core import ...`.)
 - **Server** imports from Nexus + (rarely) SDK directly for utilities like
-  `bucket_for_agent`, `distill`, `BSCClient`.
+  `distill`, `BSCClient`.
 - **Desktop** talks to Server over HTTP only.
 
 This invariant is the single most important property of the architecture.
@@ -67,7 +66,7 @@ layer independently.
 
 ### SDK — `packages/sdk/nexus_core/`
 
-**Knows about**: BSC web3, Greenfield REST + JS SDK, append-only event
+**Knows about**: BSC web3, append-only event
 logs, content-hash anchoring, curated-memory file format, contract spec
 parsing, LLM provider abstraction, tool function-calling.
 
@@ -143,14 +142,14 @@ desktop  ──POST /api/v1/llm/chat────────▶  server.chat
                                         twin.chat(message)  ── 9 steps:
                                               │     1. ContractEngine.pre_check
                                               │     2. event_log.append("user_message", …)
-                                              │        → ChainBackend → Greenfield PUT
+                                              │        → ChainBackend → durable store
                                               │     3. project memory (CuratedMemory or
                                               │        ProjectionMemory)
                                               │     4. llm.chat(messages, system, tools)
                                               │     5. ContractEngine.post_check
                                               │     6. DriftScore.update
                                               │     7. event_log.append("assistant_response", …)
-                                              │        → ChainBackend → Greenfield PUT
+                                              │        → ChainBackend → durable store
                                               │     8. on_event mirror → server.sync_events
                                               │     9. background:
                                               │        - evolution.after_conversation_turn
@@ -176,7 +175,7 @@ For the full byte-level trace see [`docs/concepts/data-flow.md`](docs/concepts/d
 | Per-user CuratedMemory snapshot | `~/.nexus_server/twins/{user_id}/curated_memory.md` | Twin |
 | Per-user persona evolution history | `~/.nexus_server/twins/{user_id}/persona.json` | Twin |
 | Per-user contracts + drift state | `~/.nexus_server/twins/{user_id}/contracts/...` | Twin |
-| Chain mode: durable event mirror | Greenfield bucket `nexus-agent-{token_id}` | ChainBackend (SDK) |
+| Chain mode: durable event store | `NEXUS_CACHE_DIR` local store (S3-compatible mirror planned) | ChainBackend (SDK) |
 | Chain mode: state-root hashes | BSC `AgentStateExtension` per token | ChainBackend (SDK) |
 | Identity registration | BSC ERC-8004 IdentityRegistry | SDK (`BSCClient.register_agent`) |
 | Server-side audit mirror | `nexus_server.db.sync_events` | Server (transitional) |
@@ -197,11 +196,8 @@ Mapping:
 
 - `user_id` ←→ `token_id`: stored in `users.chain_agent_id` column.
 - `user_id` → `agent_id`: derived (first 8 chars).
-- `agent_id` → bucket name: `bucket_for_agent(token_id)` =
-  `"nexus-agent-{token_id}"`.
 
-The Greenfield bucket name is `token_id`-keyed (so a third party can
-verify by token). The local SQLite paths are `user_id`/`agent_id`-keyed
+The local SQLite paths are `user_id`/`agent_id`-keyed
 (server's own convention). Chain registrations are token-id keyed
 (forever). See [`docs/concepts/identity.md`](docs/concepts/identity.md)
 for the full mapping diagram.

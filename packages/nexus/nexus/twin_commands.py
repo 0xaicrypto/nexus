@@ -132,7 +132,6 @@ def format_identity(twin: "DigitalTwin") -> str:
     if twin._chain_client:
         lines.append(f"Wallet: {twin._chain_client.address}")
         lines.append(f"BSC Network: {twin.config.network}")
-        lines.append(f"Greenfield Bucket: {twin.config.greenfield_bucket}")
 
         if twin._erc8004_agent_id is not None:
             try:
@@ -333,7 +332,7 @@ async def sync_chain(twin: "DigitalTwin") -> str:
             lines.append(f"  Registration error: {e}")
 
     # 2. Save current session to chain
-    lines.append("Syncing session to Greenfield + BSC...")
+    lines.append("Syncing session checkpoint + BSC anchor...")
     try:
         await twin._save_session()
         lines.append("  Session checkpoint saved")

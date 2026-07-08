@@ -338,7 +338,7 @@ class EpisodesStore:
     @property
     def base_dir(self) -> Path:
         """Where episodes are stored. Useful for tests and
-        Greenfield mirroring."""
+        backend mirroring."""
         return self._dir
 
     def _working_path(self) -> Path:

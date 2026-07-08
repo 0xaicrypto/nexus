@@ -12,7 +12,7 @@ Properties (by construction):
   - Multi-tenant isolation: each agent has its own log
   - Stateless: no mutable memory state, only append-only log + pure projection
 
-Storage: SQLite (local, fast, durable) with optional Greenfield sync.
+Storage: SQLite (local, fast, durable) with optional chain-backend snapshots.
 """
 
 from __future__ import annotations
@@ -203,7 +203,7 @@ class EventLog:
         zombies.
 
         Caller responsibilities:
-          * Greenfield object copies (if any) — issue separate
+          * Chain-backend object copies (if any) — issue separate
             object delete calls against the chain backend. This
             method only touches the local SQLite event_log.
           * BSC state-root anchors are immutable on chain. Existing
@@ -247,7 +247,7 @@ class EventLog:
     # ── Chain recovery (永生 story) ──────────────────────────────
 
     def snapshot_path(self) -> str:
-        """Canonical Greenfield path for this agent's EventLog
+        """Canonical storage path for this agent's EventLog
         snapshot. Used by ``snapshot_to`` (write) and
         ``recover_from`` (read) so they're guaranteed consistent.
 
@@ -260,21 +260,20 @@ class EventLog:
         return f"agents/{safe}/event_log/snapshot.json"
 
     async def snapshot_to(self, chain_backend) -> dict:
-        """Dump the full event log to Greenfield as a single JSON
-        snapshot. Returns the snapshot dict (so tests can assert on
-        shape).
+        """Dump the full event log to the chain backend as a single
+        JSON snapshot. Returns the snapshot dict (so tests can assert
+        on shape).
 
         Why a full snapshot rather than per-event blobs:
           * EventLog is append-only — replaying an old snapshot +
             new tail is the same as replaying the latest snapshot.
           * One JSON read on cold start ≪ N round-trips.
           * For a 10000-event log at ~0.5KB each, snapshot ≈ 5MB —
-            still reasonable for Greenfield.
+            still a reasonable single object.
 
         Trigger cadence is the caller's choice (typical: every
         ``memory_compact`` event, since that's a natural quiescent
-        moment). Best-effort: if Greenfield is unreachable, the
-        ChainBackend WAL keeps the bytes for the next attempt.
+        moment). Best-effort.
         """
         rows = self._conn.execute(
             "SELECT idx, timestamp, event_type, content, metadata, "
@@ -307,7 +306,7 @@ class EventLog:
         return snapshot
 
     async def recover_from(self, chain_backend) -> int:
-        """Re-populate this (empty) EventLog from a Greenfield
+        """Re-populate this (empty) EventLog from a chain-backend
         snapshot. Returns the number of events restored.
 
         Usage: call once at twin startup if ``count() == 0``. Idempotent

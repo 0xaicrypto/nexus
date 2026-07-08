@@ -5,7 +5,7 @@ Domain logic:
   - Checkpoint parent linking (builds a history chain)
   - In-memory cache for fast reads
   - On-chain anchoring after each save
-  - Path management for Greenfield layout
+  - Path management for the storage layout
 
 Storage layout:
     agents/{agent_id}/sessions/{thread_id}/{checkpoint_id}.json

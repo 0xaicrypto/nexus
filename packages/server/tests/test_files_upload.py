@@ -149,12 +149,11 @@ def test_resolve_files_scopes_to_owner(client):
 
 
 def test_upload_persists_sha256_and_extracted_text_columns(client):
-    """The three-layer file store relies on three new columns on the
-    uploads table: ``sha256`` (integrity + Greenfield key suffix),
-    ``gnfd_path`` (canonical Layer 1 pointer), and ``extracted_text``
-    (Layer 2 cache for text projection). This test confirms a fresh
-    upload populates ``sha256`` immediately and leaves ``extracted_text``
-    empty until first read.
+    """The file store relies on columns on the uploads table:
+    ``sha256`` (integrity hash) and ``extracted_text`` (cache for the
+    text projection); ``gnfd_path`` survives as a legacy column. This
+    test confirms a fresh upload populates ``sha256`` immediately and
+    leaves ``extracted_text`` empty until first read.
     """
     from nexus_server.database import get_db_connection
     token = _register(client)
@@ -177,8 +176,7 @@ def test_upload_persists_sha256_and_extracted_text_columns(client):
     assert len(sha256) == 64, "sha256 hex must be 64 chars"
     # extracted_text only fills on the first read_uploaded_file call.
     assert extracted_text == ""
-    # gnfd_path may be empty if the user's twin isn't in chain mode
-    # (the test doesn't have a real Greenfield); but the column itself
+    # gnfd_path is a legacy column — always empty for new rows, but it
     # must exist and round-trip without crashing.
     assert isinstance(gnfd_path, str)
 

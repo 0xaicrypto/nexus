@@ -2,7 +2,7 @@
 Nexus — Storage Backends (Strategy implementations).
 
     LocalBackend  — file-based, zero configuration
-    ChainBackend  — BSC + Greenfield, production
+    ChainBackend  — local store + BSC anchoring, production
     MockBackend   — in-memory, for unit tests
 """
 

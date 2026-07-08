@@ -5,8 +5,8 @@ Storage model: **stateless tool over a persistent file store**.
 The tool itself holds no canonical file content. When called, it
 delegates to a resolver function that implements the actual lookup
 against whatever persistent store the host owns. The host wires
-resolver + lister at twin construction time (server: SQL + disk +
-Greenfield three-layer store; future hosts: anything implementing
+resolver + lister at twin construction time (server: SQL + disk
+layered store; future hosts: anything implementing
 the same two callables).
 
 This replaces an earlier in-memory ``store(filename, content)``

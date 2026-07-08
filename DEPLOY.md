@@ -228,7 +228,7 @@ You exceeded SQLite's write throughput (rare with < 50 concurrent users). Migrat
 
 ## What's NOT covered yet
 
-- **Multi-host scaling.** Single-VPS only — the SQLite DB and the per-user file storage are local. For multi-instance you'd need Postgres + S3-compatible blob storage. (Greenfield can serve both roles, but that's a separate task.)
+- **Multi-host scaling.** Single-VPS only — the SQLite DB and the per-user file storage are local. For multi-instance you'd need Postgres + S3-compatible blob storage (the S3 mirror is a separate planned task).
 - **Automated backups.** The volume backup command above is manual. Wire it into a cron + offsite copy if the agent state matters.
 - **Log shipping.** Container logs go to docker's default driver. For production add `loki` / `vector` / `papertrail` / etc.
 

@@ -2,7 +2,7 @@
 BNBChainArtifactService — ADK-compatible ArtifactService backed by on-chain state.
 
 Artifacts (generated code, analysis results, files) are stored with
-content-hash addressing on Greenfield. The manifest (which artifacts
+content-hash addressing in the object store. The manifest (which artifacts
 exist, their versions) is stored on BSC via the StateManager.
 """
 
@@ -34,9 +34,9 @@ class BNBChainArtifactService(BaseArtifactService):
         return ":".join(parts)
 
     def _load_manifest(self, key: str) -> dict:
-        """Load artifact manifest from Greenfield (chain mode) or local JSON (local mode)."""
+        """Load artifact manifest from the object store (chain mode) or local JSON (local mode)."""
         if self._state.mode == "chain":
-            # In chain mode, store manifest in Greenfield keyed by a deterministic hash.
+            # In chain mode, store manifest in the object store keyed by a deterministic hash.
             # We keep an in-memory cache of manifest hashes.
             if not hasattr(self, "_manifest_cache"):
                 self._manifest_cache = {}
@@ -57,18 +57,18 @@ class BNBChainArtifactService(BaseArtifactService):
             return {}
 
     def _save_manifest(self, key: str, manifest: dict) -> None:
-        """Save artifact manifest to Greenfield (chain mode) or local JSON (local mode)."""
+        """Save artifact manifest to the object store (chain mode) or local JSON (local mode)."""
         # Extract agent_id from key (format: __artifacts__:appName:userId[:sessionId])
         parts = key.split(":")
         agent_id = parts[1] if len(parts) > 1 else "unknown"
         folder = self._state.agent_folder(agent_id)
-        obj_path = self._state.greenfield_path(
+        obj_path = self._state.storage_path(
             folder, "artifacts", "", filename="_manifest.json",
         )
         content_hash = self._state.store_json(manifest, object_path=obj_path)
         if self._state.mode == "chain":
             # In chain mode, cache the manifest hash in memory.
-            # The manifest data itself is stored in Greenfield.
+            # The manifest data itself is stored in the object store.
             if not hasattr(self, "_manifest_cache"):
                 self._manifest_cache = {}
             self._manifest_cache[key] = content_hash
@@ -120,10 +120,10 @@ class BNBChainArtifactService(BaseArtifactService):
         key = self._manifest_key(app_name, user_id, session_id)
         manifest = self._load_manifest(key)
 
-        # Store artifact data in Greenfield with readable path
+        # Store artifact data in the object store with readable path
         data, mime_type = self._part_to_bytes(artifact)
         folder = self._state.agent_folder(app_name)
-        obj_path = self._state.greenfield_path(
+        obj_path = self._state.storage_path(
             folder, "artifacts", "",
             filename=filename,
         )
@@ -226,7 +226,7 @@ class BNBChainArtifactService(BaseArtifactService):
         return [
             ArtifactVersion(
                 version=v["version"],
-                canonical_uri=f"greenfield://{v['content_hash']}",
+                canonical_uri=f"rune://{v['content_hash']}",
                 custom_metadata=v.get("custom_metadata", {}),
                 create_time=v.get("create_time", 0.0),
                 mime_type=v.get("mime_type"),
@@ -256,7 +256,7 @@ class BNBChainArtifactService(BaseArtifactService):
             return None
         return ArtifactVersion(
             version=entry["version"],
-            canonical_uri=f"greenfield://{entry['content_hash']}",
+            canonical_uri=f"rune://{entry['content_hash']}",
             custom_metadata=entry.get("custom_metadata", {}),
             create_time=entry.get("create_time", 0.0),
             mime_type=entry.get("mime_type"),

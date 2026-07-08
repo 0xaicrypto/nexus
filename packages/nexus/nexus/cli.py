@@ -8,7 +8,7 @@ Usage (simplest — reads everything from .env):
 Or with explicit args:
     python -m nexus --provider gemini --api-key AIza...
 
-Chain mode (BSC + Greenfield):
+Chain mode (BSC):
     python -m nexus --private-key 0x...
 """
 
@@ -96,7 +96,7 @@ def on_chain_event(event_type: str, detail: dict):
     Each event type gets a distinct visual treatment so the user
     can SEE their data flowing onto the chain.
     """
-    chain_mode = detail.get("storage", "").startswith("Greenfield")
+    chain_mode = detail.get("storage", "") == "chain"
     storage_tag = f"{GOLD}on-chain{RESET}" if chain_mode else f"{DIM}local{RESET}"
 
     if event_type == "identity_found":
@@ -226,7 +226,7 @@ async def main_loop(args):
         format=f"{DIM}%(asctime)s %(name)s %(levelname)s: %(message)s{RESET}",
     )
 
-    # Always write chain/Greenfield interactions to rune_debug.log (DEBUG level)
+    # Always write chain interactions to rune_debug.log (DEBUG level)
     # so we can trace I/O issues without --verbose cluttering the console.
     file_handler = logging.FileHandler("rune_debug.log", mode="a", encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
@@ -240,7 +240,6 @@ async def main_loop(args):
     for logger_name in [
         "nexus_core.backend.chain",          # ChainBackend: reads, writes, anchoring
         "nexus_core.providers",     # All SDK providers (memory, session, etc.)
-        "nexus_core.greenfield",    # Greenfield client
         "nexus.evolution",          # Evolution engine + all evolvers
         "nexus.twin",              # DigitalTwin core
     ]:
@@ -291,8 +290,6 @@ async def main_loop(args):
         _env(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY", "")
         or _env(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY_ADDRESS", "")
     )
-    greenfield_bucket = _env("NEXUS_GREENFIELD_BUCKET", "nexus-agent-state")
-
     if chain_mode:
         print(f"\n{GOLD}Initializing Nexus (chain mode: {network})...{RESET}")
         print(f"  {DIM}Loading ERC-8004 identity...{RESET}")
@@ -324,7 +321,6 @@ async def main_loop(args):
         agent_state_address=agent_state_address,
         task_manager_address=task_manager_address,
         identity_registry_address=identity_registry_address,
-        greenfield_bucket=greenfield_bucket,
     )
 
     # Wire up on-chain activity notifications

@@ -64,12 +64,9 @@ RUN /opt/venv/bin/pip install --no-cache-dir \
 # ── Stage 2: runtime (slim + Node + non-root user) ───────────────────
 FROM python:3.11-slim-bookworm AS runtime
 
-# Node 22 LTS ("Jod" — LTS through April 2027). Three purposes:
+# Node 22 LTS ("Jod" — LTS through April 2027). Two purposes:
 #   1. MCP server installs (agent calls `npx -y mcp-...` at runtime).
-#   2. The Greenfield bridge — nexus_core/greenfield.py shells out to
-#      packages/sdk/scripts/greenfield_daemon.cjs (and friends), which
-#      `require("@bnb-chain/greenfield-js-sdk")` + `ethers` + `long`.
-#   3. The `manage_skill` tool's marketplace search/install path — it
+#   2. The `manage_skill` tool's marketplace search/install path — it
 #      shells out to `npx -y @lobehub/market-cli ...`. That CLI's
 #      `package.json` declares `engines.node: ">=22.0.0"`, and on
 #      Node 20 its underlying `@lobehub/market-sdk` ESM imports of
@@ -79,11 +76,8 @@ FROM python:3.11-slim-bookworm AS runtime
 #      the user can't install pdf/xlsx/etc. Skills hub just won't
 #      work without bumping Node, full stop.
 #
-# greenfield-js-sdk + ethers + long all support Node 22 cleanly, so
-# bumping has no downside on the chain side.
-#
 # curl + ca-certificates for the NodeSource bootstrap and any outbound
-# HTTPS the agent needs (BSC RPC, Greenfield, Gemini, Tavily).
+# HTTPS the agent needs (BSC RPC, Gemini, Tavily).
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
@@ -95,79 +89,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && node --version && npm --version
 
-# Greenfield JS bridge deps. `npm install -g` puts them in
-# /usr/lib/node_modules, and we set NODE_PATH (further down) so Node's
-# module resolver consults the global prefix when running standalone
-# .cjs scripts from anywhere on disk. Without NODE_PATH, the global
-# install lands in the right directory but `require()` still can't
-# find them — that footgun has bitten enough projects that it's worth
-# the explicit comment.
-#
-# Pinning versions because greenfield-js-sdk's API has shifted across
-# minor releases and the daemon's payload-shape probing doesn't cover
-# every permutation. Bump these together with a daemon test run.
-# NODE_PATH must be set BEFORE the validation runs in the same RUN
-# below, otherwise `require.resolve()` only searches the cwd's
-# node_modules tree and ignores the global prefix. ENV here makes it
-# available to every subsequent layer's shell, including the validation
-# below — and to the daemon's `node script.cjs` invocations at runtime.
-ENV NODE_PATH=/usr/lib/node_modules
-
-# Greenfield JS bridge deps — installed from packages/sdk/package.json
-# (+ lock file) rather than pinned by hand, so local dev and the
-# Docker image always agree on which @bnb-chain/greenfield-js-sdk
-# major and which ethers major are in use.
-#
-# Why this mattered in production: an earlier rev of this Dockerfile
-# pinned `@bnb-chain/greenfield-js-sdk@1.2.4 ethers@6.13.2`. Local dev
-# used `^2.2.2 / ^5.7.2` (per packages/sdk/package.json). The .cjs
-# scripts were written against the v2 API + ethers v5; running them
-# against v1 / ethers v6 produced a parade of cryptic errors —
-# `authType is required`, `Cannot read properties of undefined
-# (reading 'primarySpAddress')` — that all looked like "the script is
-# broken" but were really "the script's runtime is wrong". Driving
-# both environments off the SAME package.json is the only way to
-# stop this from happening again.
-#
-# `npm ci` (vs `npm install`) refuses to fall back to resolution if
-# package-lock.json doesn't match — so a stale lock file is a build-
-# time error, not a silent drift.
-COPY packages/sdk/package.json      /tmp/gnfd-deps/package.json
-COPY packages/sdk/package-lock.json /tmp/gnfd-deps/package-lock.json
-# Tune npm to survive the NA→EU latency DigitalOcean fra1 → registry.
-# npmjs.org has on heavy days. Defaults are fetch-retries=2 +
-# fetch-timeout=300s — we hit EIDLETIMEOUT (idle reset mid-tarball-
-# stream) on a 200+ package install, which fails the WHOLE npm ci.
-# Bumping retries to 5 and timeout to 10 min covers the typical glitch
-# without making a healthy build any slower.
-RUN npm config set fetch-retries 5 \
- && npm config set fetch-retry-maxtimeout 120000 \
- && npm config set fetch-timeout 600000
-
-# Step 1: install. Isolated in its own RUN so a network blip costs us
-# the install layer only — not the cp / cleanup / validation that
-# follow. Docker layer cache will reuse this on the next build if
-# package.json + lock haven't changed.
-RUN cd /tmp/gnfd-deps \
- && npm ci --omit=dev --no-audit --no-fund
-
-# Step 2: shuffle the installed tree to NODE_PATH and validate. Cheap
-# (cp + node -e checks), so its own layer is fine.
-#
-# Important: cd OUT of /tmp/gnfd-deps before deleting it. An earlier
-# rev did `rm -rf /tmp/gnfd-deps && npm cache clean` while still cd'd
-# inside that directory; the npm process inherited the now-dangling
-# cwd and crashed with `ENOENT: no such file or directory, uv_cwd`
-# when it tried to read `process.cwd()` during boot. `cd /` first.
-RUN mkdir -p /usr/lib/node_modules \
- && cp -r /tmp/gnfd-deps/node_modules/. /usr/lib/node_modules/ \
- && cd / \
- && rm -rf /tmp/gnfd-deps \
- && npm cache clean --force \
- && node -e "console.log('greenfield-js-sdk:', require.resolve('@bnb-chain/greenfield-js-sdk'))" \
- && node -e "console.log('ethers:',           require.resolve('ethers'))" \
- && node -e "console.log('long:',             require.resolve('long'))"
-
 # Non-root user — important for the volume mounts below: skills /
 # uploads / db get written under /data with this UID, so a host-side
 # `chown -R 1000:1000 /var/lib/nexus` is sufficient.
@@ -177,23 +98,10 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash nexus
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
-# NODE_PATH is set higher up (next to the npm install) so the build-time
-# `require.resolve` checks pass. It's already in the image env at this
-# point; no need to redeclare here.
 
 # App code (already inside the venv as editable installs).
 COPY --from=builder --chown=nexus:nexus /build /app
 WORKDIR /app
-
-# Tell nexus_core where the Greenfield .cjs helpers live. The wheel
-# install puts nexus_core itself under /opt/venv/.../site-packages/, but
-# the helpers under packages/sdk/scripts/ aren't packaged in (separate
-# fix tracked in the SDK's pyproject.toml backlog). For now the COPY
-# above puts them at /app/packages/sdk/scripts/, and this env var lets
-# nexus_core.greenfield._find_script bypass its 4-path heuristic and
-# go straight there. Docker = explicit; editable installs on a dev box
-# can leave this unset and the heuristic handles them.
-ENV NEXUS_SCRIPTS_DIR=/app/packages/sdk/scripts
 
 # Persistent state lives under /data — this is the ONLY directory the
 # host needs to back up. Layout:

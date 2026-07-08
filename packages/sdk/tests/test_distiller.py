@@ -29,7 +29,7 @@ from nexus_core.distiller import (
 def test_top_level_imports_exposed():
     """``nexus_core.distill`` and friends must be importable directly
     from the package root — same ergonomic surface as the other utilities
-    (``EventLog``, ``GreenfieldClient``, etc.)."""
+    (``EventLog``, ``ChainBackend``, etc.)."""
     assert nexus_core.distill is distill
     assert nexus_core.extract_text is extract_text
     assert nexus_core.DISTILL_INPUT_CHAR_BUDGET == DISTILL_INPUT_CHAR_BUDGET

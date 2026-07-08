@@ -322,7 +322,7 @@ class ImpressionProviderImpl(ImpressionProvider):
 
         IMPORTANT: Uses try/finally to ensure _loaded_agents is set even
         when the task is cancelled (e.g., by asyncio.wait_for timeout).
-        Without this, every subsequent call would retry the slow Greenfield GET.
+        Without this, every subsequent call would retry the slow backend GET.
         """
         if agent_id in self._loaded_agents:
             return

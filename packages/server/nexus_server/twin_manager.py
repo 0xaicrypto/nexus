@@ -16,10 +16,8 @@ Operating modes (decided per-user at twin creation):
         ``/api/v1/chain/register-agent`` endpoint on first signup.
       - A BSC RPC URL is resolvable from config.
     When in chain mode, twin's own ChainBackend is active: every
-    event_log append goes to BNB Greenfield and anchors a state-root
-    update on BSC. The Greenfield bucket is **per-agent**, computed
-    via ``nexus_core.bucket_for_agent(token_id)`` — there is no
-    shared bucket fallback (intentional, post-S0 architecture).
+    event_log append lands in the durable local store and anchors a
+    state-root update on BSC.
 
   * **Local mode** — fallback when chain prereqs are missing. Twin still
     works (DPM event log + projection + memory evolution all run), it
@@ -284,7 +282,7 @@ def _resolve_chain_kwargs(user_id: str) -> dict:
 
     Returns an empty dict when any prerequisite is missing — twin will
     then start in local mode (still fully functional, just doesn't
-    write to BSC + Greenfield).
+    anchor to BSC).
     """
     if not config.SERVER_PRIVATE_KEY:
         logger.debug(
@@ -316,15 +314,6 @@ def _resolve_chain_kwargs(user_id: str) -> dict:
             )
             return {}
 
-    try:
-        from nexus_core.utils.agent_id import bucket_for_agent
-    except Exception as e:
-        logger.warning(
-            "Twin local mode for %s: bucket_for_agent import failed: %s",
-            user_id, e,
-        )
-        return {}
-
     net_short = config.network_short
     net_prefix = "MAINNET" if net_short == "mainnet" else "TESTNET"
 
@@ -341,7 +330,6 @@ def _resolve_chain_kwargs(user_id: str) -> dict:
         "identity_registry_address": (
             getattr(config, f"NEXUS_{net_prefix}_IDENTITY_REGISTRY", "") or ""
         ),
-        "greenfield_bucket": bucket_for_agent(token_id),
     }
 
 
@@ -368,17 +356,14 @@ async def _create_twin(user_id: str):
     chain_kwargs = _resolve_chain_kwargs(user_id)
     if chain_kwargs:
         logger.info(
-            "TwinManager: chain mode for user %s "
-            "(bucket=%s, network=%s)",
+            "TwinManager: chain mode for user %s (network=%s)",
             user_id,
-            chain_kwargs.get("greenfield_bucket"),
             chain_kwargs.get("network"),
         )
         # Bug 2 fix: pass the cached token_id so twin's _initialize
         # pre-seeds its identity cache and skips the background
         # _register_identity task that would otherwise mint a second
-        # ERC-8004 token. The token_id is implicit in the bucket name
-        # (nexus-agent-{token_id}) so we recover it by reading the DB.
+        # ERC-8004 token.
         cached_token_id = _read_chain_agent_id(user_id)
         if cached_token_id is not None:
             chain_kwargs["cached_agent_id"] = cached_token_id
@@ -556,16 +541,15 @@ def start_reaper() -> tuple[asyncio.Task, asyncio.Event]:
 #
 # After S4 the UI's anchor counters (read from sync_anchors) became
 # permanently 0 for chat-mode users — twin's ChainBackend writes BSC
-# anchors and Greenfield objects directly, no longer touching that
-# table. Failures landed only in stderr, invisible to the operator.
+# anchors directly, no longer touching that table. Failures landed
+# only in stderr, invisible to the operator.
 #
 # We add a logging.Handler that subscribes to the SDK's
-# ``rune.backend.chain`` and ``rune.greenfield`` loggers, parses the
-# success/failure messages, identifies the user via agent_id prefix,
-# and persists one row per attempt into ``twin_chain_events``. The
-# /agent/state and /agent/timeline endpoints then count + render those
-# rows so the desktop sidebar reflects what's actually happening on
-# chain.
+# ``rune.backend.chain`` logger, parses the success/failure messages,
+# identifies the user via agent_id prefix, and persists one row per
+# attempt into ``twin_chain_events``. The /agent/state and
+# /agent/timeline endpoints then count + render those rows so the
+# desktop sidebar reflects what's actually happening on chain.
 #
 # Why log scraping instead of an in-process callback? The SDK's
 # ChainBackend is a generic library; threading an ``on_event`` hook
@@ -579,38 +563,20 @@ import re as _re
 
 
 # Pre-compiled regexes match the exact format strings in
-# nexus_core.backends.chain and nexus_core.greenfield. If you
-# change those format strings, update these — there's a regression
-# test that injects synthetic LogRecords to keep the pair in lockstep.
+# nexus_core.backends.chain. If you change those format strings,
+# update these — there's a regression test that injects synthetic
+# LogRecords to keep the pair in lockstep.
 _RE_BSC_OK = _re.compile(
     r"\[WRITE\]\[BSC\] Anchor OK: agent=(?P<agent>[\w-]+) "
     r"hash=(?P<hash>[0-9a-fA-F]+) tx=(?P<tx>[0-9a-fA-F]+)"
     r"(?: \((?P<dur>[\d.]+)s\))?"
 )
-_RE_GF_PUT_OK = _re.compile(
-    r"\[WRITE\]\[Greenfield\] PUT (?P<path>\S+) "
-    r"\((?P<bytes>\d+) bytes, hash=(?P<hash>[0-9a-fA-F]+)\)"
-)
-# Emitted by GreenfieldClient._put_greenfield when a write falls back to
-# local cache. Distinct from outright "failed" — data is still safe in
-# the local fallback dir, but it didn't make it onto Greenfield. We
-# record this as ``status="degraded"`` so the desktop's chain-events
-# stream can render it differently from both "ok" (green) and
-# "failed" (red) — it's the in-between case operators most need to see.
-_RE_GF_FALLBACK = _re.compile(
-    r"\[FALLBACK\]\[Greenfield\] PUT (?P<path>\S+) "
-    r"\((?P<bytes>\d+) bytes, hash=(?P<hash>[0-9a-fA-F]+)\) "
-    r"reason=(?P<reason>.+)"
-)
-_RE_GF_FAIL = _re.compile(r"Greenfield (?:put|get) failed: (?P<error>.+)")
-# BSC anchor failure — emitted by chain.py's `_anchor_state_root`
-# except branch. Same shape philosophy as _RE_GF_FALLBACK: structured
-# fields so we can record a `degraded` chain event with the actual
-# revert reason instead of just a generic warning. Without this, BSC
-# failures were utterly invisible to the desktop UI — same silent-fail
-# class as the Greenfield bug fixed in the previous pass.
+# BSC anchor failure — emitted by chain.py's anchor except branch.
+# Structured fields so we can record a failure chain event with the
+# actual revert reason instead of just a generic warning. Without
+# this, BSC failures were utterly invisible to the desktop UI.
 _RE_BSC_FAIL = _re.compile(
-    r"\[FALLBACK\]\[BSC\] Anchor failed for (?P<agent>[\w-]+) "
+    r"\[FALLBACK\]\[BSC\] Anchor failed for (?P<agent>[\w-]+) (?:— )?"
     r"agent=\S+ hash=(?P<hash>[0-9a-fA-F]+) reason=(?P<reason>.+)"
 )
 
@@ -680,23 +646,17 @@ def _record_chain_event(
 
 
 class _ChainActivityLogHandler(logging.Handler):
-    """Watch ``rune.backend.chain`` and ``rune.greenfield`` loggers for
-    chain write activity and persist rows into twin_chain_events.
+    """Watch the ``rune.backend.chain`` logger for chain write
+    activity and persist rows into twin_chain_events.
 
     Multi-tenant attribution works by matching the agent_id token in
-    the BSC anchor message to a user row. The Greenfield logger's
-    failure messages don't carry agent_id directly, so we attribute
-    them to "the most recently active twin user" — racy in heavy
-    concurrent load but adequate for current scale; an in-process
-    correlation context would be the proper fix at that point.
+    the BSC anchor message to a user row.
     """
 
     def __init__(self) -> None:
         super().__init__(level=logging.WARNING)
-        # Best-effort attribution for Greenfield failures: when a
-        # ChainBackend operation logs its agent context, we record it
-        # here and use it for any subsequent "Greenfield put failed"
-        # line that doesn't carry the agent_id explicitly.
+        # Most recently attributed twin user — kept for best-effort
+        # attribution of log lines that don't carry agent_id.
         self._last_user: Optional[str] = None
 
     def emit(self, record: logging.LogRecord) -> None:  # noqa: D401
@@ -748,55 +708,6 @@ class _ChainActivityLogHandler(logging.Handler):
                         error=m.group("reason"),
                     )
                 return
-            m = _RE_GF_PUT_OK.search(msg)
-            if m:
-                # The PUT log line is logged AFTER greenfield.put returns;
-                # if we already recorded a failure for this path/hash via
-                # rune.greenfield's WARNING, we don't double-count. Match
-                # by content_hash within the same second.
-                # For simplicity, just record the success and let the
-                # state endpoint use latest-row-wins semantics.
-                if self._last_user:
-                    _record_chain_event(
-                        self._last_user,
-                        kind="greenfield_put",
-                        status="ok",
-                        summary=f"PUT {m.group('path')} ({m.group('bytes')} bytes)",
-                        content_hash=m.group("hash"),
-                        object_path=m.group("path"),
-                    )
-                return
-
-        elif name == "nexus_core.greenfield":
-            # Try the FALLBACK pattern before the generic "put failed"
-            # — fallback messages are MORE specific (carry path + hash
-            # + reason) and we want the structured fields, not the
-            # blanket "Greenfield write failed".
-            m = _RE_GF_FALLBACK.search(msg)
-            if m and self._last_user:
-                _record_chain_event(
-                    self._last_user,
-                    kind="greenfield_put",
-                    status="degraded",
-                    summary=(
-                        f"Greenfield write fell back to local "
-                        f"({m.group('path')})"
-                    ),
-                    content_hash=m.group("hash"),
-                    object_path=m.group("path"),
-                    error=m.group("reason"),
-                )
-                return
-
-            m = _RE_GF_FAIL.search(msg)
-            if m and self._last_user:
-                _record_chain_event(
-                    self._last_user,
-                    kind="greenfield_put",
-                    status="failed",
-                    summary="Greenfield write failed",
-                    error=m.group("error"),
-                )
 
 
 _chain_log_handler: Optional[_ChainActivityLogHandler] = None
@@ -813,11 +724,9 @@ def install_chain_activity_handler() -> None:
     global _chain_log_handler
     if _chain_log_handler is not None:
         # Detach previous instance first so we don't double-write.
-        for name in ("nexus_core.backend.chain", "nexus_core.greenfield"):
-            logging.getLogger(name).removeHandler(_chain_log_handler)
+        logging.getLogger("nexus_core.backend.chain").removeHandler(_chain_log_handler)
     _chain_log_handler = _ChainActivityLogHandler()
-    for name in ("nexus_core.backend.chain", "nexus_core.greenfield"):
-        logging.getLogger(name).addHandler(_chain_log_handler)
+    logging.getLogger("nexus_core.backend.chain").addHandler(_chain_log_handler)
     logger.info("Chain activity log handler installed (twin_chain_events)")
 
 
@@ -826,8 +735,7 @@ def uninstall_chain_activity_handler() -> None:
     global _chain_log_handler
     if _chain_log_handler is None:
         return
-    for name in ("nexus_core.backend.chain", "nexus_core.greenfield"):
-        logging.getLogger(name).removeHandler(_chain_log_handler)
+    logging.getLogger("nexus_core.backend.chain").removeHandler(_chain_log_handler)
     _chain_log_handler = None
 
 

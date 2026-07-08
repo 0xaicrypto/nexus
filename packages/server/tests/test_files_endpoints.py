@@ -17,7 +17,7 @@ def _h(token: str) -> dict:
 
 def _seed_upload(user_id: str, **kwargs) -> str:
     """Insert a fake uploads row directly so we don't have to round-
-    trip multipart upload + Greenfield mirror in every test."""
+    trip a multipart upload in every test."""
     from nexus_server import files as _files
     from nexus_server.database import get_db_connection
     _files._ensure_uploads_table()

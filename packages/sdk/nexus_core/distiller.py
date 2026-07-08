@@ -3,7 +3,7 @@
 Originally lived in ``nexus_server.attachment_distiller`` — moved here so
 any consumer of the SDK can use the same pipeline without re-implementing
 it. The server-side persistence (writing the resulting summary into
-``sync_events`` so it rides Greenfield + BSC anchors) is intentionally
+``sync_events`` so it rides the event log + BSC anchors) is intentionally
 NOT in this module: that's a deployment-specific concern that the
 server keeps in its own thin shim. This module only does:
 

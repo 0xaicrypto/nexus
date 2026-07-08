@@ -21,7 +21,7 @@ Currently exposes one tool:
   event log so the agent can find earlier conversations on a topic and
   cite them in the current reply. Inspired by Claude.ai's "search past
   chats" feature, but built on our own append-only event log (which
-  already exists for DPM / projection / Greenfield mirroring — we're
+  already exists for DPM / projection / chain anchoring — we're
   just adding a search index over it).
 
 Design notes

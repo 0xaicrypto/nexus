@@ -174,42 +174,31 @@ def _chain_client_returns_none_when_unconfigured() -> None:
         )
 
 
-# ── 7. chain_health_snapshot exposes the new observability fields ────
+# ── 7. chain_health_snapshot exposes the observability fields ────────
 
 def _chain_health_snapshot_has_new_fields() -> None:
-    """Make sure the post-#985 fields stay in chain_health_snapshot.
+    """Make sure the BSC observability fields stay in chain_health_snapshot.
 
     A future refactor of chain.py could easily drop these — and the
-    desktop's "fallback_active / last_write_error / bsc_failure_active /
-    last_bsc_anchor_error / wal_oldest_age_seconds" cards would silently
-    revert to misleading green. This is a compile-time-style invariant
-    the integration tests would only catch with a real chain backend.
+    desktop's "bsc_failure_active / last_bsc_anchor_error" cards would
+    silently revert to misleading green. This is a compile-time-style
+    invariant the integration tests would only catch with a real chain
+    backend.
     """
     # Walk a synthetic instance — chain.py's ChainBackend has a heavy
-    # __init__ that needs Greenfield + BSC. We only want the schema
-    # check, so stub the slot-level state via __new__.
+    # __init__ that needs BSC config. We only want the schema check,
+    # so stub the slot-level state via __new__.
     from nexus_core.backends import chain as chain_mod  # noqa: PLC0415
     backend = chain_mod.ChainBackend.__new__(chain_mod.ChainBackend)
-    backend._greenfield = None
     backend._chain_client = None
-    backend._wal = None  # wal_queue_size catches this and returns 0
-    backend._last_write_error = None
-    backend._daemon_alive = True
-    backend._last_daemon_ok = None
-    backend._last_greenfield_fallback_at = None
     backend._last_bsc_anchor_failure_at = None
     backend._last_bsc_anchor_error = None
 
-    # wal_queue_size + wal_oldest_pending tolerate _wal=None via try/except.
     snap = backend.chain_health_snapshot()
 
     required = {
-        "wal_queue_size", "daemon_alive", "last_daemon_ok",
-        "greenfield_ready", "bsc_ready",
-        # Post-#985 fields — see ChainHealthCard in agent_state.py.
-        "fallback_active", "last_write_error",
+        "bsc_ready",
         "bsc_failure_active", "last_bsc_anchor_error",
-        "wal_oldest_age_seconds", "wal_oldest_pending_path",
     }
     missing = required - set(snap.keys())
     if missing:
@@ -218,72 +207,6 @@ def _chain_health_snapshot_has_new_fields() -> None:
             f"Got: {sorted(snap.keys())}. The desktop's degraded-state UI "
             f"depends on these — don't drop them."
         )
-
-
-# ── 8. greenfield-js-sdk + ethers majors match packages/sdk/package.json
-
-def _node_deps_major_matches_pyproject() -> None:
-    """Catches the agent #985 silent-fallback root cause: an earlier
-    Dockerfile pinned greenfield-js-sdk@1.2.4 + ethers@6 while local dev
-    used ^2.2.2 + ^5.7.2 (per packages/sdk/package.json). The .cjs
-    scripts target v2 / ethers-v5; running them against v1 / ethers-v6
-    threw a parade of confusing errors before falling back to local.
-
-    Now both the wheel build (in Docker) and the local dev npm install
-    drive off the same package.json. This check enforces that the
-    /usr/lib/node_modules tree (where Docker installs) carries the
-    SAME major version as packages/sdk/package.json declares — so any
-    future drift is caught at smoke-test time, not at production
-    deploy time.
-
-    Skipped in environments without a /usr/lib/node_modules (e.g. a PR
-    runner that hasn't run the Docker build yet) — gated to "in-image"
-    via SMOKE_IN_DOCKER=1.
-    """
-    if os.getenv("SMOKE_IN_DOCKER") != "1":
-        return  # Schema check only; skip outside of the built image.
-    import json  # noqa: PLC0415
-
-    # Source-of-truth: packages/sdk/package.json (search a few paths
-    # because cwd varies between the Docker image and the host repo).
-    pkg_paths = [
-        pathlib.Path("packages/sdk/package.json"),
-        pathlib.Path("/app/packages/sdk/package.json"),
-    ]
-    pkg = None
-    for p in pkg_paths:
-        if p.is_file():
-            pkg = json.loads(p.read_text())
-            break
-    if pkg is None:
-        return  # No source-of-truth available; nothing to compare against.
-
-    declared = pkg.get("dependencies", {})
-    installed_root = pathlib.Path("/usr/lib/node_modules")
-    if not installed_root.is_dir():
-        return  # Not a Docker runtime — skip.
-
-    for name in ("@bnb-chain/greenfield-js-sdk", "ethers"):
-        spec = declared.get(name)
-        if not spec:
-            continue
-        # ^2.2.2 → 2 (major).
-        want_major = spec.lstrip("^~").split(".")[0]
-        meta_path = installed_root / name / "package.json"
-        if not meta_path.is_file():
-            raise AssertionError(
-                f"{name}: package.json declares {spec} but it's missing "
-                f"from {installed_root} — npm ci didn't install it"
-            )
-        meta = json.loads(meta_path.read_text())
-        got_major = str(meta.get("version", "")).split(".")[0]
-        if got_major != want_major:
-            raise AssertionError(
-                f"{name}: declared major v{want_major} (from package.json "
-                f"spec {spec!r}) but installed v{meta['version']}. The "
-                f"Dockerfile is no longer driving off package.json — fix "
-                f"before merging."
-            )
 
 
 # ── Driver ────────────────────────────────────────────────────────────
@@ -299,7 +222,6 @@ def main() -> int:
     check("NEXUS_NETWORK rejects underscore typo",    _network_validation_rejects_underscore)
     check("chain_proxy returns None when unconfig.",  _chain_client_returns_none_when_unconfigured)
     check("chain_health_snapshot has degraded fields", _chain_health_snapshot_has_new_fields)
-    check("npm deps majors match package.json",       _node_deps_major_matches_pyproject)
     print("─" * 60)
     if _failures:
         print(f"FAILED: {len(_failures)} check(s)")
