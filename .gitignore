@@ -68,7 +68,10 @@ TestResults/
 node_modules/
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
+# pnpm content-addressable store cache — must NEVER be committed
+.pnpm-store/
+# NOTE: pnpm-lock.yaml is intentionally NOT ignored — lockfiles are
+# required for reproducible installs and MUST be committed.
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
