@@ -423,7 +423,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         with get_db_connection() as _es_conn:
             init_event_sourcing_schema(_es_conn)
             # #213 — apply any pending schema migrations (Rev-7 §16.6).
-            from nexus_server.migrations import apply_pending
+            from nexus_server.es_migrations import apply_pending
             applied = apply_pending(_es_conn)
             if applied:
                 logger.info("schema migrations applied: %s", applied)

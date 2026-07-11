@@ -2,12 +2,12 @@
 // Updates on every `pnpm tauri:build` (the script bumps the patch
 // component first). See scripts/bump-version.mjs for the
 // DESKTOP_VERSION_OVERRIDE env var used for tagged releases.
-export const BUILD_ID = '0.1.15';
-export const BUILD_TS = '2026-07-11T15:22:02.137Z';
+export const BUILD_ID = '0.1.16';
+export const BUILD_TS = '2026-07-11T15:50:58.815Z';
 // Legacy aliases — main.tsx + a couple of other consumers reach for
 // these names. Keep the names stable so we don't have to touch every
 // log site on every build.
 export const BUILD_TIME = BUILD_TS;
-export const GIT_SHA = 'e6026b6';
+export const GIT_SHA = '0344623';
 // Convenience constant for log lines / about box.
 export const BUILD_STAMP = `v${BUILD_ID} · ${BUILD_TS}`;
