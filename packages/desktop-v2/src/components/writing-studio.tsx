@@ -63,7 +63,10 @@ import {
   type WritingDocMeta, type WritingPhiFinding, type WritingPhiResolution,
   type WritingRefGranularity, type WritingReference, type WritingSnapshot,
 } from '../lib/api-client';
-import { useAppState, type WritingChatMsg } from '../store';
+import {
+  useAppState, EMPTY_DRAFT_ATTACHMENTS,
+  type DraftAttachment, type WritingChatMsg,
+} from '../store';
 import { cn, patientDisplayLabel } from '../lib/util';
 import { useT } from '../lib/i18n';
 import type { Dict } from '../lib/i18n/en-US';
@@ -78,6 +81,13 @@ import {
 import { RefChip, RefChipProvider, refChipLeafText } from './ref-chip';
 import { MessageRow } from './chat-message';
 import { ChatComposer } from './chat-composer';
+// F-writing-attachments — reuse the SAME staged-attachment chip row +
+// placeholder builder the other chat surfaces use (research-workspace
+// exports them; Encounter renders the identical DraftAttachment
+// states). No forked chip markup here.
+import {
+  AttachmentChipsRow, _makeChatAttachment,
+} from './research-workspace';
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -631,7 +641,11 @@ export function WritingStudio() {
    * server starts a turn it may apply a doc revision — abandoning the
    * stream client-side would desync the canvas from the server copy.
    */
-  async function sendChatTurn(text: string, skills: string[] = []) {
+  async function sendChatTurn(
+    text: string,
+    skills: string[] = [],
+    attachments: { fileId: string; name: string }[] = [],
+  ) {
     if (!activeDocId) return;
     const docId = activeDocId;
     const st = useAppState.getState();
@@ -661,7 +675,7 @@ export function WritingStudio() {
     let warnings: string[] = [];
     try {
       for await (const frame of api.chatWritingDoc(
-        docId, { message: text, refIds: includedRefIds, skills },
+        docId, { message: text, refIds: includedRefIds, skills, attachments },
       )) {
         const g = useAppState.getState();
         if (frame.type === 'reply_chunk') {
@@ -767,10 +781,14 @@ export function WritingStudio() {
 
   /** Chat send entry point for the panel. Wraps the message with the
    *  active selection quote (which auto-clears on send). */
-  function onChatSend(text: string, skills: string[]) {
+  function onChatSend(
+    text: string,
+    skills: string[],
+    attachments: { fileId: string; name: string }[] = [],
+  ) {
     const message = selQuote ? composeQuoteMessage(selQuote.text, text) : text;
     setSelQuote(null);
-    void sendChatTurn(message, skills);
+    void sendChatTurn(message, skills, attachments);
   }
 
   /* ── snapshots ────────────────────────────────────────────── */
@@ -1445,7 +1463,11 @@ function WritingChatPanel({
   /** Active canvas selection quote (chip above the composer). */
   selQuote: SelectionQuote | null;
   onDismissQuote: () => void;
-  onSend: (text: string, skills: string[]) => void;
+  onSend: (
+    text: string,
+    skills: string[],
+    attachments: { fileId: string; name: string }[],
+  ) => void;
   /** '@' typed into the composer → open the reference picker. */
   onAtTyped: () => void;
   onUndoRevision: (snapshotId: string) => void;
@@ -1457,10 +1479,88 @@ function WritingChatPanel({
   const snapshotByMsg = useAppState((s) => s.writingChatSnapshotByMsg);
   const draftText = useAppState((s) => s.drafts[chatDraftKey(docId)] ?? '');
   const setDraft = useAppState((s) => s.setDraft);
+  const showToast = useAppState((s) => s.showToast);
 
   // F-skills — skills picked from the composer's "/" menu; applied to
   // the next turn only, then cleared on send (same as EncounterMode).
   const [skills, setSkills] = useState<string[]>([]);
+
+  // F-writing-attachments — staged 📎 uploads live in the zustand
+  // draftAttachments map keyed 'writing-chat-{docId}' (same key the
+  // composer text uses), so switching doc / workspace mid-composition
+  // keeps the chips. Same UX contract as EncounterMode: chip appears
+  // immediately on paste / drop / picker; fileId fills in when
+  // /files/upload returns; failed uploads show the ✕ state.
+  const attachments = useAppState((s) =>
+    s.draftAttachments[chatDraftKey(docId)]
+      ?? (EMPTY_DRAFT_ATTACHMENTS as DraftAttachment[]));
+  const storeSetAttachments = useAppState((s) => s.setDraftAttachments);
+  const setAttachments = useCallback(
+    (atts: DraftAttachment[] | ((prev: DraftAttachment[]) => DraftAttachment[])) =>
+      storeSetAttachments(chatDraftKey(docId), atts),
+    [storeSetAttachments, docId],
+  );
+
+  async function uploadOne(file: File): Promise<string | null> {
+    try {
+      // Same endpoint as EncounterMode (/api/v1/files/upload). Writing
+      // docs have no patient / library scope, so no scope options.
+      const r = await api.uploadFile(file, file.name);
+      return r.fileId;
+    } catch (e) {
+      showToast(`Upload failed: ${String(e)}`, 'error');
+      return null;
+    }
+  }
+
+  // Attach one or more File objects (paste / drop / picker). Each gets
+  // a placeholder chip immediately so the UI feels responsive; the
+  // chip transitions to "ready" when its upload completes.
+  function acceptFiles(files: FileList | File[]) {
+    const arr = Array.from(files);
+    if (arr.length === 0) return;
+    const placeholders = arr.map(_makeChatAttachment);
+    setAttachments((prev) => [...prev, ...placeholders]);
+    arr.forEach((file, idx) => {
+      const key = placeholders[idx].key;
+      uploadOne(file).then((fid) => {
+        setAttachments((prev) => prev.map((a) =>
+          a.key === key
+            ? { ...a, fileId: fid, failed: fid ? undefined : 'upload failed' }
+            : a,
+        ));
+      });
+    });
+  }
+
+  // Clipboard paste handler — captures pasted images (screen-grab /
+  // copy-image-from-browser) and copied files; plain text falls
+  // through to the default paste.
+  function onPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      e.preventDefault();
+      acceptFiles(files);
+    }
+  }
+
+  // Drag-drop onto the composer — same effect as paste.
+  function onDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    if (e.dataTransfer?.files?.length) acceptFiles(e.dataTransfer.files);
+  }
+
+  function removeAttachment(key: string) {
+    // Revoke any blob URL the thumbnail was using to avoid leaking
+    // bitmap memory in the WebView (same as the other chat surfaces).
+    setAttachments((prev) => {
+      const found = prev.find((a) => a.key === key);
+      if (found?.previewUrl) {
+        try { URL.revokeObjectURL(found.previewUrl); } catch { /* ignore */ }
+      }
+      return prev.filter((a) => a.key !== key);
+    });
+  }
 
   // History hydrate — once per doc (undefined = never loaded; a live
   // send marks the transcript loaded first, so we never clobber it).
@@ -1498,12 +1598,24 @@ function WritingChatPanel({
     [list.length, list[list.length - 1]?.text],
   );
 
-  /** One send — forwards the picked skills and clears them (one-turn
-   *  application, same as the other composers). */
+  /** One send — forwards the picked skills + settled attachments and
+   *  clears them (one-turn application, same as the other composers). */
   function doSend(text: string) {
     if (streaming) return;
-    onSend(text, skills);
+    // Wait for all in-flight uploads to settle so the file_ids we
+    // pass are real — a half-uploaded paste shouldn't silently drop
+    // the file (same rule as EncounterMode).
+    const pending = attachments.filter((a) => a.fileId === null && !a.failed);
+    if (pending.length > 0) {
+      showToast(`Waiting for ${pending.length} upload(s)…`, 'info');
+      return;
+    }
+    const turnAttachments = attachments
+      .filter((a) => a.fileId)
+      .map((a) => ({ fileId: a.fileId as string, name: a.name }));
+    onSend(text, skills, turnAttachments);
     setSkills([]);
+    setAttachments([]);
   }
 
   return (
@@ -1581,17 +1693,31 @@ function WritingChatPanel({
           sendDisabled={!draftText.trim()}
           tone="base"
           placeholder={t('writing.chat.placeholder')}
+          onPaste={onPaste}
+          onDrop={onDrop}
+          onPickFiles={acceptFiles}
           error={error}
           onDismissError={() => setWritingChatError(docId, null)}
           selectedSkills={skills}
           onSkillsChange={setSkills}
-          above={selQuote ? (
-            <SelectionQuoteStrip
-              quote={selQuote}
-              streaming={streaming}
-              onDismiss={onDismissQuote}
-              onPreset={doSend}
-            />
+          above={selQuote || attachments.length > 0 ? (
+            <>
+              {selQuote && (
+                <SelectionQuoteStrip
+                  quote={selQuote}
+                  streaming={streaming}
+                  onDismiss={onDismissQuote}
+                  onPreset={doSend}
+                />
+              )}
+              {/* Pending 📎 chips — same shared row the research chats
+                  use; states (⟳ uploading / ✓ ready / ✕ failed) and
+                  image thumbnails are identical across surfaces. */}
+              <AttachmentChipsRow
+                attachments={attachments}
+                onRemove={removeAttachment}
+              />
+            </>
           ) : undefined}
         />
       </div>

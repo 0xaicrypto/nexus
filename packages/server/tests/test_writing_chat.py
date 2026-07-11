@@ -528,6 +528,153 @@ def test_chat_requested_enabled_skill_injected_into_prompt(
     assert SKILL_MARKER not in mock2.call_args[0][1]
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Attachments — 📎 uploads ride into the co-writing system prompt
+# ─────────────────────────────────────────────────────────────────────
+
+
+def _seed_upload(user_id, file_id, name, extracted_text,
+                 mime="text/plain"):
+    """Insert a fake uploads row directly (same convention as
+    test_files_endpoints / the chat attachment tests) so we don't have
+    to round-trip a multipart upload."""
+    from nexus_server import files as _files
+    from nexus_server.database import get_db_connection
+    _files._ensure_uploads_table()
+    with get_db_connection() as conn:
+        conn.execute(
+            "INSERT INTO uploads (file_id, user_id, name, mime, "
+            " size_bytes, disk_path, created_at, sha256, gnfd_path, "
+            " extracted_text) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (file_id, user_id, name, mime, 100, "/tmp/nonexistent",
+             "2026-07-01T00:00:00Z", "deadbeef", "", extracted_text),
+        )
+        conn.commit()
+
+
+def test_chat_attachment_content_injected_into_prompt(
+    client, monkeypatch,
+):
+    """A staged 📎 upload's extracted text lands in the co-writing
+    system prompt as a '## 用户附件: {name}' section — after the
+    reference snapshots, before the skills block."""
+    user = _register(client, "alice")
+    patient_hash = _register_patient(client, user, initials="张三丰")
+    doc = _create_doc(client, user)
+    ref_id = _add_reference(client, user, doc["id"], patient_hash)
+    _install_skill(client, user, monkeypatch)
+    _seed_upload(
+        user["user_id"], "file-labs", "labs.txt",
+        "Hemoglobin 8.5 g/dL (low). WBC 14k.",
+    )
+
+    mock = _mock_llm(monkeypatch, "好的，已参考附件内容。")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat",
+        json={
+            "message": "参考附件里的化验结果写一段基线描述",
+            "ref_ids": [ref_id],
+            "skills": ["haiku-mode"],
+            "attachments": [{"file_id": "file-labs", "name": "labs.txt"}],
+        },
+        headers=_auth(user),
+    )
+    assert r.status_code == 200, r.text
+    frames = _sse_frames(r.text)
+    assert frames[-1]["type"] == "done"
+
+    args, _ = mock.call_args
+    system_prompt = args[1]
+    # Section header + the file's extracted text made it in.
+    assert "## 用户附件: labs.txt" in system_prompt
+    assert "Hemoglobin 8.5 g/dL (low). WBC 14k." in system_prompt
+    # Co-writing contract intact.
+    assert "<doc>" in system_prompt
+    # Ordering: references → attachments → skills.
+    assert (system_prompt.index("引用数据")
+            < system_prompt.index("## 用户附件: labs.txt")
+            < system_prompt.index("ACTIVE SKILLS"))
+
+
+def test_chat_attachment_text_capped_at_8k(client, monkeypatch):
+    """Same per-attachment cap as the v2 chat path — 8000 chars."""
+    user = _register(client, "alice")
+    doc = _create_doc(client, user)
+    big = "A" * 8000 + "TAIL-MARKER-NOT-IN-PROMPT"
+    _seed_upload(user["user_id"], "file-big", "big.txt", big)
+
+    mock = _mock_llm(monkeypatch, "好的。")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat",
+        json={"message": "总结附件",
+              "attachments": [{"file_id": "file-big", "name": "big.txt"}]},
+        headers=_auth(user),
+    )
+    assert r.status_code == 200, r.text
+    system_prompt = mock.call_args[0][1]
+    assert "## 用户附件: big.txt" in system_prompt
+    assert "AAAA" in system_prompt
+    assert "TAIL-MARKER-NOT-IN-PROMPT" not in system_prompt
+
+
+def test_chat_foreign_and_unknown_file_ids_silently_skipped(
+    client, monkeypatch,
+):
+    """Another user's file_id (and a nonexistent one) must not leak
+    into the prompt — no error, the turn proceeds without them."""
+    alice = _register(client, "alice")
+    bob = _register(client, "bob")
+    doc = _create_doc(client, alice)
+    _seed_upload(bob["user_id"], "bob-file", "secret.txt",
+                 "BOB-SECRET-99321")
+
+    mock = _mock_llm(monkeypatch, "好的。")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat",
+        json={
+            "message": "用附件写一段",
+            "attachments": [
+                {"file_id": "bob-file", "name": "secret.txt"},
+                {"file_id": "no-such-file", "name": "ghost.txt"},
+            ],
+        },
+        headers=_auth(alice),
+    )
+    assert r.status_code == 200, r.text
+    frames = _sse_frames(r.text)
+    assert frames[-1]["type"] == "done"
+
+    system_prompt = mock.call_args[0][1]
+    assert "BOB-SECRET-99321" not in system_prompt
+    assert "## 用户附件" not in system_prompt
+
+
+def test_chat_attachment_numbers_not_provenance_warned(
+    client, monkeypatch,
+):
+    """Numbers the model copies FROM an attachment are sourced —
+    they must not trip the hallucination guard."""
+    user = _register(client, "alice")
+    doc = _create_doc(client, user)
+    _seed_upload(user["user_id"], "file-labs", "labs.txt",
+                 "血红蛋白 8.5，白细胞 14。")
+
+    _mock_llm(monkeypatch,
+              "好的。<doc>基线：血红蛋白 8.5，白细胞 14。</doc>")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat",
+        json={"message": "按附件写基线",
+              "attachments": [{"file_id": "file-labs", "name": "labs.txt"}]},
+        headers=_auth(user),
+    )
+    assert r.status_code == 200, r.text
+    frames = _sse_frames(r.text)
+    types = [f["type"] for f in frames]
+    assert "provenance_warning" not in types
+    assert types[-1] == "done"
+
+
 def test_chat_deleting_doc_clears_transcript(client, monkeypatch):
     user = _register(client, "alice")
     doc = _create_doc(client, user)

@@ -204,6 +204,14 @@ class ChatRequest(BaseModel):
     # user_skill_prefs are injected on EVERY turn. Same contract as
     # chat_router.ChatRequest; see skills_router.build_skills_block.
     skills: list[str] = []
+    # File attachments staged in the writing composer (📎 button /
+    # paste / drag-drop). Each entry is {file_id, name}. file_id must
+    # reference an ``uploads`` row owned by the current user; unknown /
+    # foreign ids are silently skipped (same contract as the v2 chat
+    # path in chat_router). Extracted / distilled text is injected into
+    # the co-writing system prompt as '## 用户附件: {name}' sections —
+    # after the reference snapshots, before the skills block.
+    attachments: list[dict] = []
 
 
 class PhiScanRequest(BaseModel):
@@ -1272,6 +1280,73 @@ async def doc_chat(
         else:
             snapshots = [str(r["snapshot"] or "") for r in ref_rows]
 
+        # ── ATTACHMENTS ──────────────────────────────────────────────
+        # Same resolution as chat_router (the v2 chat path): user-scoped
+        # ``uploads`` lookup by file_id, cached ``extracted_text`` with
+        # an on-demand extraction fallback (nexus_core distiller via
+        # files._bytes_to_text, cached back to the row), unknown /
+        # foreign file_ids silently skipped. Each attachment's inlined
+        # text is capped at the same 8 KB the v2 path uses so a
+        # 500-page PDF can't blow the prompt context.
+        attachment_sections: list[tuple[str, str]] = []
+        for att in req.attachments or []:
+            if not isinstance(att, dict):
+                continue
+            fid = str(att.get("file_id") or "").strip()
+            if not fid:
+                continue
+            try:
+                arow = conn.execute(
+                    "SELECT name, mime, extracted_text, disk_path "
+                    "FROM uploads "
+                    "WHERE user_id = ? AND file_id = ?",
+                    (current_user, fid),
+                ).fetchone()
+            except Exception:  # noqa: BLE001
+                arow = None
+            if not arow:
+                continue
+            a_name = str(arow["name"] or att.get("name") or fid)
+            a_mime = str(arow["mime"] or "")
+            a_text = str(arow["extracted_text"] or "").strip()
+            a_path = str(arow["disk_path"] or "")
+            a_is_image = a_mime.startswith("image/")
+
+            # On-demand text extraction if not cached (mirrors the
+            # Track-A lazy extract in chat_router).
+            if not a_text and not a_is_image and a_path:
+                try:
+                    from pathlib import Path as _Path
+                    p = _Path(a_path)
+                    if p.is_file():
+                        raw = p.read_bytes()
+                        from nexus_server.files import (
+                            _bytes_to_text, _save_extracted_text,
+                        )
+                        text_out = _bytes_to_text(raw, a_name, a_mime)
+                        if text_out:
+                            a_text = text_out.strip()
+                            _save_extracted_text(fid, a_text)
+                except Exception as e:  # noqa: BLE001
+                    logger.debug(
+                        "doc chat: lazy extract for %s failed: %s",
+                        fid[:8], e,
+                    )
+
+            if a_text:
+                section = a_text[:8000]
+            elif a_is_image:
+                section = (
+                    "（图片附件——未提取到文字内容。写作对话暂不支持直接"
+                    "查看图片；如写作依赖其内容，请向用户说明。）"
+                )
+            else:
+                section = (
+                    "（二进制文件——无法提取文本内容。如写作依赖其内容，"
+                    "请向用户说明并请求文字版。）"
+                )
+            attachment_sections.append((a_name, section))
+
         # Last N turns, chronological, EXCLUDING the message being sent
         # now (it's appended below as the live user turn).
         hist_rows = conn.execute(
@@ -1307,6 +1382,14 @@ async def doc_chat(
             "\n\n以下是本文档的引用数据（已脱敏），写作时只能使用这些"
             "数据中的数值：\n" + "\n---\n".join(snapshots)
         )
+
+    # ── USER ATTACHMENTS ─────────────────────────────────────────────
+    # Per-turn 📎 uploads from the writing composer. Injected AFTER the
+    # reference snapshots (they are additional source material, ranked
+    # below the doc's curated references) and BEFORE the skills block
+    # (skills may override tone/format and must stay last).
+    for a_name, a_text in attachment_sections:
+        system_prompt += f"\n\n## 用户附件: {a_name}\n{a_text}"
 
     # ── ACTIVE SKILLS ────────────────────────────────────────────────
     # Same injection as chat_router: explicit "/" invocations from
@@ -1408,6 +1491,11 @@ async def doc_chat(
                 allowed |= _extract_numbers(req.message)
                 for s in snapshots:
                     allowed |= _extract_numbers(s)
+                # Attachment text is legitimate source material the
+                # medic supplied this turn — numbers copied from it
+                # must not trip the hallucination guard.
+                for _a_name, a_text in attachment_sections:
+                    allowed |= _extract_numbers(a_text)
                 suspicious: list[str] = []
                 for m in _NUM_RE.finditer(doc_body):
                     token = m.group(0)

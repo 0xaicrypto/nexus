@@ -2338,7 +2338,13 @@ class _ApiClient {
    */
   async *chatWritingDoc(
     id: string,
-    input: { message: string; refIds?: string[]; skills?: string[] },
+    input: {
+      message: string; refIds?: string[]; skills?: string[];
+      /** Per-turn 📎 uploads (already POSTed via uploadFile). The
+       *  server injects each file's extracted text into the
+       *  co-writing system prompt as a '## 用户附件' section. */
+      attachments?: { fileId: string; name: string }[];
+    },
     abortSignal?: AbortSignal,
   ): AsyncIterable<WritingChatFrame> {
     const path = `/api/v1/docs/${encodeURIComponent(id)}/chat`;
@@ -2352,6 +2358,13 @@ class _ApiClient {
         // contract as the main chat endpoint).
         ...(input.skills !== undefined && input.skills.length > 0
           ? { skills: input.skills } : {}),
+        ...(input.attachments !== undefined && input.attachments.length > 0
+          ? {
+              attachments: input.attachments.map((a) => ({
+                file_id: a.fileId, name: a.name,
+              })),
+            }
+          : {}),
       }),
       signal: abortSignal,
     });

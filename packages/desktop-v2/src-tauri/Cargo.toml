@@ -1,6 +1,6 @@
 [package]
 name = "nexus-desktop-v2"
-version = "0.1.13"
+version = "0.1.15"
 description = "Nexus desktop — clinical workflow agent"
 authors = ["JZ"]
 edition = "2021"

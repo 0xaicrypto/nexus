@@ -1400,12 +1400,13 @@ interface ChatMessage {
  */
 type ChatAttachment = DraftAttachment;
 
-// Shared chip renderer used by the per-study Research ChatTab AND the
-// workspace-level CrossResearchChat. Lives at module scope so the two
-// chat components can both grow their own attachment list independently
-// without duplicating the (now non-trivial) layout / thumbnail / state
-// chips logic.
-function AttachmentChipsRow({
+// Shared chip renderer used by the per-study Research ChatTab, the
+// workspace-level CrossResearchChat AND the Writing Studio's co-writing
+// composer (writing-studio.tsx). Lives at module scope (and is
+// exported) so every chat surface can grow its own attachment list
+// independently without duplicating the (now non-trivial) layout /
+// thumbnail / state chips logic.
+export function AttachmentChipsRow({
   attachments, onRemove,
 }: {
   attachments: ChatAttachment[];
@@ -1469,8 +1470,9 @@ function AttachmentChipsRow({
 // Helper: build a ChatAttachment placeholder from a File. If the file
 // is an image, also generate a blob URL for the thumbnail. The caller
 // is responsible for revoking the URL when the chip is removed
-// (handled in the onRemove handlers below).
-function _makeChatAttachment(file: File): ChatAttachment {
+// (handled in the onRemove handlers below). Exported for the Writing
+// Studio composer, which stages the same DraftAttachment shape.
+export function _makeChatAttachment(file: File): ChatAttachment {
   const isImage = (file.type || '').startsWith('image/');
   return {
     key: `${file.name}-${file.size}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
