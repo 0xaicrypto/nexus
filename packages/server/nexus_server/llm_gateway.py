@@ -1642,6 +1642,21 @@ async def call_openai(messages, system_prompt, model, temperature, max_tokens, t
     )
 
 
+# Moonshot runs two disjoint key namespaces: the international platform
+# (platform.moonshot.ai → api.moonshot.ai) and the China platform
+# (platform.moonshot.cn → api.moonshot.cn). A key from one returns 401
+# invalid_authentication_error on the other. When the operator hasn't
+# pinned KIMI_BASE_URL explicitly, we try the default first and on a
+# 401 retry the sibling region ONCE; the winner is cached here for the
+# process lifetime (and exported to os.environ so the SDK's twin path
+# resolves the same region).
+_KIMI_REGION_SIBLING = {
+    "https://api.moonshot.ai/v1": "https://api.moonshot.cn/v1",
+    "https://api.moonshot.cn/v1": "https://api.moonshot.ai/v1",
+}
+_kimi_resolved_base: str | None = None
+
+
 async def call_kimi(messages, system_prompt, model, temperature, max_tokens, tools):
     """Call Moonshot AI Kimi — OpenAI-compatible Chat Completions API.
 
@@ -1649,10 +1664,12 @@ async def call_kimi(messages, system_prompt, model, temperature, max_tokens, too
     "length" on truncation), just a different base_url + key. Key is
     KIMI_API_KEY (MOONSHOT_API_KEY accepted as fallback in config);
     endpoint defaults to https://api.moonshot.ai/v1, overridable via
-    KIMI_BASE_URL.
+    KIMI_BASE_URL. On 401 with the default endpoint, auto-falls back
+    to the sibling region (.cn/.ai) once and remembers the winner.
     """
+    global _kimi_resolved_base
     try:
-        from openai import AsyncOpenAI
+        from openai import AsyncOpenAI, AuthenticationError
     except ImportError:
         raise ValueError("openai not installed. Install with: pip install openai")
 
@@ -1661,14 +1678,34 @@ async def call_kimi(messages, system_prompt, model, temperature, max_tokens, too
             "KIMI_API_KEY not configured (MOONSHOT_API_KEY is also accepted)"
         )
 
-    client = AsyncOpenAI(
-        api_key=config.KIMI_API_KEY,
-        base_url=config.KIMI_BASE_URL,
-    )
-    return await _call_openai_compatible(
-        client, "kimi", "Kimi",
-        messages, system_prompt, model, temperature, max_tokens, tools,
-    )
+    explicit_override = bool(os.getenv("KIMI_BASE_URL", "").strip())
+    base = _kimi_resolved_base or config.KIMI_BASE_URL
+
+    async def _attempt(base_url: str):
+        client = AsyncOpenAI(api_key=config.KIMI_API_KEY, base_url=base_url)
+        return await _call_openai_compatible(
+            client, "kimi", "Kimi",
+            messages, system_prompt, model, temperature, max_tokens, tools,
+        )
+
+    try:
+        result = await _attempt(base)
+        _kimi_resolved_base = base
+        return result
+    except AuthenticationError:
+        sibling = _KIMI_REGION_SIBLING.get(base)
+        if explicit_override or not sibling:
+            raise
+        logger.info(
+            "Kimi 401 on %s — retrying sibling region %s "
+            "(key likely from the other Moonshot platform)", base, sibling,
+        )
+        result = await _attempt(sibling)
+        _kimi_resolved_base = sibling
+        # Let the SDK/twin path resolve the same region.
+        os.environ["KIMI_BASE_URL"] = sibling
+        logger.info("Kimi region resolved to %s (cached for process)", sibling)
+        return result
 
 
 async def _call_openai_compatible(
