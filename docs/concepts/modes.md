@@ -96,7 +96,7 @@ The signing wallet is `SERVER_PRIVATE_KEY` — one per server deployment.
 This is **custodial chain mode**: web2 users without their own wallets
 get on-chain agents because the server signs for them. The trade-off:
 
-- **Pro**: zero-friction onboarding. Sign in with passkey, immediately
+- **Pro**: zero-friction onboarding. Sign in with username + password, immediately
   have a chain-anchored agent.
 - **Con**: the server operator can sign for the user. Not Web3-native.
 
@@ -104,7 +104,7 @@ A future *non-custodial* mode would have the user sign in with their
 wallet (MetaMask / WalletConnect) and the server pass through the
 user's address. That'd require:
 
-- Auth flow change (passkey → wallet signature)
+- Auth flow change (password → wallet signature)
 - ChainBackend's `private_key` becomes per-twin instead of server-wide
 - Cost shifts to user (each twin pays its own gas)
 

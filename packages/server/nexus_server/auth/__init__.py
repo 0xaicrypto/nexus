@@ -1,4 +1,4 @@
-"""Auth domain — passkey registration / login + JWT verification.
+"""Auth domain — username/password login + JWT verification.
 
 Public surface (what other server modules / tests import):
 
@@ -7,9 +7,6 @@ Public surface (what other server modules / tests import):
         get_current_user,      # dependency for authenticated routes
         create_jwt, verify_jwt,
     )
-
-The HTML/JS payload that browsers hit during passkey ceremonies
-(``/passkey``) lives at :mod:`nexus_server.auth.passkey_page`.
 """
 
 from .routes import *  # noqa: F401, F403  — re-export for back-compat
@@ -19,6 +16,3 @@ from .routes import (
     create_jwt_token,
     verify_jwt_token,
 )
-
-# Sub-router for the passkey HTML page (mounted separately by main.py).
-from . import passkey_page  # noqa: F401

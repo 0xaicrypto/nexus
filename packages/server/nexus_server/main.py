@@ -2,7 +2,7 @@
 
 Creates and configures the main FastAPI application with:
   - Routers (auth, llm_gateway, chain_proxy, agent_state, files,
-    user_profile, passkey_page) — note ``sync_hub`` was retired in
+    user_profile) — note ``sync_hub`` was retired in
     Phase B when the desktop became a thin client.
   - CORS middleware
   - Exception handlers
@@ -119,8 +119,6 @@ from nexus_server import (
     sessions_router, thinking_stream, user_profile,
     workflows_router,
 )
-# Phase C: passkey_page moved into the ``auth`` domain package.
-from nexus_server.auth import passkey_page
 # Phase B: ``sync_hub`` is gone (raises ImportError). /sync/push and
 # /sync/pull retired after Round 2 made the desktop a thin client.
 from nexus_server.config import get_config
@@ -671,7 +669,6 @@ def create_app() -> FastAPI:
     # Every route requires role='admin' via require_admin.
     from nexus_server import admin_router as _admin_router
     app.include_router(_admin_router.router)
-    app.include_router(passkey_page.router)
     app.include_router(llm_gateway.router)
     app.include_router(chain_proxy.router)
     # Stripe billing — checkout / portal / webhook / status. Routes
@@ -824,8 +821,8 @@ def run_server() -> None:
 
     HTTPS
     -----
-    WebAuthn passkey auth requires HTTPS unless the client connects via
-    localhost. Two ways to give this server a TLS certificate:
+    Remote (non-localhost) access should run over HTTPS. Two ways to
+    give this server a TLS certificate:
 
       1. **Self-signed** — `./scripts/generate_self_signed_cert.sh`
          produces ``cert.pem`` + ``key.pem``. Quick, works for any IP /
@@ -910,8 +907,8 @@ def run_server() -> None:
     )
     if scheme == "http" and args.host not in ("127.0.0.1", "localhost"):
         logger.warning(
-            "Server is bound to %s on plain HTTP. WebAuthn passkey auth "
-            "will REFUSE to run from any client that's not on the same "
+            "Server is bound to %s on plain HTTP. Credentials will be "
+            "sent in cleartext to any client that's not on the same "
             "machine. Generate a TLS cert (see --ssl-certfile / scripts/"
             "generate_self_signed_cert.sh) for remote access.",
             args.host,

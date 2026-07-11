@@ -83,7 +83,7 @@ export function IdentityPicker() {
 
   /** Switching accounts = sign out + prefill the login form. There is
    *  no server-side "activate" any more — the other account's
-   *  password (or passkey) is required. */
+   *  password is required. */
   function handleSwitch(target: Identity) {
     setOpen(false);
     if (target.userId === activeUserId) return;

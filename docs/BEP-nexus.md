@@ -704,7 +704,7 @@ and contributes the persistent-memory layer ERC-8183 lacks.
 | -------------------- | ---------------------- | --------------------------------------------------------- |
 | SDK                  | `packages/sdk` (`nexus_core`) | DPM, ABC, anchor batch builder, JCS canonicalisation, SHA-256 / keccak-256 hashing (`nexus_core.anchor`). |
 | Framework            | `packages/nexus` (`nexus`) | Reference agent runtime, Evolution (memory / skill / persona / knowledge), MCP-aware tool registry. |
-| Server               | `packages/server` (`nexus_server`) | Multi-tenant FastAPI: passkey auth, LLM gateway, /agent/{state,timeline,memories,messages} read views, runtime lifecycle. |
+| Server               | `packages/server` (`nexus_server`) | Multi-tenant FastAPI: username + password (bcrypt) + JWT auth, LLM gateway, /agent/{state,timeline,memories,messages} read views, runtime lifecycle. |
 | Desktop client       | `packages/desktop`     | Avalonia C# thin client (Windows / macOS / Linux).        |
 | Solidity             | `contracts/`           | `AgentStateExtension.sol`, `TaskStateManager.sol`, `NexusEvolutionHook.sol`. |
 

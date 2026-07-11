@@ -13,7 +13,7 @@
  *
  * UI: full-width dialog (same Radix pattern as the other full-screen
  * overlays) with a table of users — username, role, created, last
- * login, status badges (active/disabled · has_password · has_passkey)
+ * login, status badges (active/disabled · has_password)
  * — and per-row actions:
  *   - Disable (confirm dialog; hidden on the signed-in admin's row)
  *   - Enable
@@ -290,9 +290,6 @@ export function AdminUsersView() {
                               <Chip>{t('admin.status.password')}</Chip>
                             ) : (
                               <Chip variant="caution">{t('admin.status.noPassword')}</Chip>
-                            )}
-                            {u.hasPasskey && (
-                              <Chip>{t('admin.status.passkey')}</Chip>
                             )}
                           </div>
                         </td>

@@ -33,16 +33,9 @@ import type {
 //   2. http://localhost:8001 — the sidecar default (src-tauri/lib.rs
 //      sets NEXUS_HOST=localhost, NEXUS_PORT=8001 when spawning).
 //
-// Why ``localhost`` and not ``127.0.0.1`` (F19): WebAuthn / passkey
-// requires the page's effective domain to be a DNS name — IP literals
-// are rejected by Chromium/WebKit ("127.0.0.1 is an invalid domain"
-// when the registrar tries to create a credential against rp.id =
-// "localhost"). The Tauri WebviewWindow that hosts the passkey page
-// navigates to ``${baseUrl}/auth/passkey-page``, so baseUrl HAS to
-// use the DNS name. Everything else (REST chat, file uploads) works
-// over either name; sticking to ``localhost`` end-to-end keeps the
-// origin consistent so CORS and CSP rules don't have to allowlist
-// both.
+// Why ``localhost`` and not ``127.0.0.1`` (F19): sticking to the DNS
+// name end-to-end keeps the origin consistent so CORS and CSP rules
+// don't have to allowlist both spellings.
 //
 // We CANNOT default to "" (relative URL) because in a bundled .dmg the
 // frontend is served from tauri://localhost — relative URLs resolve
@@ -313,7 +306,6 @@ class _ApiClient {
       disabled_at:   string | number | null;
       last_login_at: string | number | null;
       has_password:  boolean;
-      has_passkey:   boolean;
     }
     const r = await this.fetch<{ users: RawUser[] }>('/api/v1/admin/users');
     return (r.users ?? []).map((u) => ({
@@ -324,7 +316,6 @@ class _ApiClient {
       disabledAt:  u.disabled_at ?? null,
       lastLoginAt: u.last_login_at ?? null,
       hasPassword: !!u.has_password,
-      hasPasskey:  !!u.has_passkey,
     }));
   }
 
@@ -1792,117 +1783,6 @@ class _ApiClient {
     };
   }
 
-  /* ────────────────────────── passkey ────────────────────────── */
-
-  /** Run the v1-style passkey ceremony from desktop-v2.
-   *
-   *  Architecture
-   *  ────────────
-   *  v1's .NET desktop launched the system browser at /auth/passkey-page,
-   *  then ran an HttpListener on an ephemeral port to capture the
-   *  callback redirect. v2 doesn't have an HttpListener primitive in
-   *  Tauri's Rust runtime, so we reuse the EXISTING sidecar as both the
-   *  page server AND the callback receiver:
-   *
-   *    1. Mint a UUID ``session_id`` locally.
-   *    2. Open a Tauri WebviewWindow at
-   *       ``/auth/passkey-page?mode=login&callback=…/passkey/bounce/<session_id>``.
-   *    3. User completes the WebAuthn ceremony in the popup window.
-   *    4. The page's success path navigates to the callback URL with
-   *       ``?token=<jwt>`` appended (v1's redirect contract).
-   *    5. The sidecar's ``/passkey/bounce`` endpoint stashes the token
-   *       in an in-memory dict keyed by session_id.
-   *    6. We poll ``/passkey/poll/<session_id>`` every 500 ms until the
-   *       token lands or the 5-minute timeout fires.
-   *    7. On ``ready``, return the token to the caller (LoginView) and
-   *       close the popup.
-   *
-   *  Security
-   *  ────────
-   *  Token never leaves the loopback interface — the bounce URL hits
-   *  the local FastAPI sidecar, and the poll request comes from this
-   *  same Tauri webview. session_id is UUIDv4 (~3e36 brute-force space)
-   *  with a 5-min TTL. The token is popped on first poll-read, so even
-   *  a stolen session_id can't be replayed.
-   */
-  async passkeyAuth(
-    mode: 'login' | 'signup',
-    displayName: string = '',
-  ): Promise<{ token: string }> {
-    const sessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-    // The callback URL the passkey_page.py JS will redirect to. Path-
-    // based session_id so v1's ``callback + "?token=" + jwt`` doesn't
-    // collide with a pre-existing query string.
-    const callback = `${baseUrl}/api/v1/auth/passkey/bounce/${encodeURIComponent(sessionId)}`;
-    const params = new URLSearchParams({
-      mode,
-      callback,
-    });
-    if (mode === 'signup' && displayName.trim()) {
-      params.set('display_name', displayName.trim());
-    }
-    const pageUrl = `${baseUrl}/auth/passkey-page?${params.toString()}`;
-
-    // Try the Tauri path — opens a real desktop popup. Outside Tauri
-    // (pnpm dev in a browser) fall back to window.open so devs can
-    // still exercise the flow without a Tauri build.
-    let popupClose: (() => void) | null = null;
-    try {
-      const mod = await import('@tauri-apps/api/webviewWindow');
-      const WebviewWindow = (mod as { WebviewWindow?: typeof import('@tauri-apps/api/webviewWindow').WebviewWindow }).WebviewWindow;
-      if (WebviewWindow) {
-        const label = `passkey-${sessionId.slice(0, 8)}`;
-        const win = new WebviewWindow(label, {
-          url: pageUrl,
-          title: mode === 'login' ? 'Sign in with passkey' : 'Sign up with passkey',
-          width: 520,
-          height: 700,
-          resizable: false,
-          focus: true,
-        });
-        popupClose = async () => {
-          try { await win.close(); } catch { /* already closed */ }
-        };
-      }
-    } catch {
-      /* not in Tauri runtime — fall through */
-    }
-    if (!popupClose) {
-      // Browser dev mode: open in a new tab. User closes manually
-      // after sign-in; the polling loop still captures the token.
-      const w = window.open(pageUrl, '_blank',
-        'width=520,height=700,resizable=no');
-      popupClose = () => { try { w?.close(); } catch { /* ignore */ } };
-    }
-
-    // Poll until ready or timeout. 500ms × 600 polls = 5 minutes.
-    const POLL_INTERVAL_MS = 500;
-    const MAX_POLLS = 600;
-    let polls = 0;
-    while (polls < MAX_POLLS) {
-      polls++;
-      try {
-        const r = await this.fetch<{ status: string; token: string | null }>(
-          `/api/v1/auth/passkey/poll/${encodeURIComponent(sessionId)}`,
-        );
-        if (r.status === 'ready' && r.token) {
-          popupClose();
-          return { token: r.token };
-        }
-      } catch {
-        /* sidecar transient blip — keep polling */
-      }
-      await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
-    }
-    popupClose();
-    throw new Error(
-      'Passkey sign-in timed out. The popup window stayed open for ' +
-      '5 minutes without completing. Close it and try again.',
-    );
-  }
-
   /* ────────────────────────── scheduled tasks ────────────────────────── */
 
   /** POST /api/v1/schedule/confirm — the user confirmed a scheduled
@@ -2717,7 +2597,6 @@ export interface AdminUser {
   disabledAt:  string | number | null;
   lastLoginAt: string | number | null;
   hasPassword: boolean;
-  hasPasskey:  boolean;
 }
 
 /** Shape returned by the Tauri `get_sidecar_diagnostics` IPC. Mirrors

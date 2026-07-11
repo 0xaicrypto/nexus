@@ -3,7 +3,7 @@
 Loads all server settings from environment variables with sensible defaults.
 Organized by functional area:
   - Server basics (host, port, environment)
-  - Security (JWT, WebAuthn, CORS)
+  - Security (JWT, CORS)
   - LLM providers (keys and defaults)
   - Blockchain (RPC, contracts)
   - Rate limiting
@@ -35,17 +35,6 @@ class ServerConfig:
     JWT_EXPIRATION_HOURS: int = int(
         os.getenv("JWT_EXPIRATION_HOURS", "24")
     )
-
-    # WebAuthn — F19. The passkey page is served from the sidecar at
-    # http://localhost:8001/auth/passkey-page (NOT :3000, that's the
-    # Vite dev server which never serves the passkey page). The
-    # expected origin during attestation verification MUST match the
-    # actual page origin or the ceremony fails. Default updated to
-    # the sidecar's port; can still be overridden via env for hosted
-    # deployments.
-    WEBAUTHN_RP_ID: str = os.getenv("WEBAUTHN_RP_ID", "localhost")
-    WEBAUTHN_RP_NAME: str = os.getenv("WEBAUTHN_RP_NAME", "Nexus")
-    WEBAUTHN_ORIGIN: str = os.getenv("WEBAUTHN_ORIGIN", "http://localhost:8001")
 
     # LLM Configuration
     DEFAULT_LLM_PROVIDER: str = os.getenv(
@@ -221,9 +210,6 @@ class ServerConfig:
         if self.ENVIRONMENT == "production":
             assert self.SERVER_SECRET != "dev-secret-key", (
                 "SERVER_SECRET must be set in production"
-            )
-            assert self.WEBAUTHN_RP_ID != "localhost", (
-                "WEBAUTHN_RP_ID must be set to real domain in production"
             )
 
         # Validate NEXUS_NETWORK loudly — a typo (e.g. "bsc_mainnet" with

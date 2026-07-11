@@ -116,7 +116,7 @@ def main() -> int:
     # The frontend's baseUrl is still ``http://localhost:8001`` — the
     # browser's DNS resolver picks ``127.0.0.1`` for ``localhost``
     # (universal default), so it lands on the IPv4 socket we just
-    # bound. This combo keeps WebAuthn-friendliness (origin = DNS
+    # bound. This combo keeps browser-friendliness (origin = DNS
     # name) AND deterministic server binding.
     host = os.environ.get("NEXUS_HOST", "127.0.0.1")
     port = int(os.environ.get("NEXUS_PORT", "8001"))

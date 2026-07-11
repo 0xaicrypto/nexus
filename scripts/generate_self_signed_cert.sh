@@ -4,7 +4,7 @@
 #
 # When to use this
 # ================
-# You want passkey auth to work (which requires HTTPS) but don't have a
+# You want HTTPS for remote access but don't have a
 # domain (so Let's Encrypt is hard) and don't want to set up Caddy +
 # nip.io. Trade-off: browsers show a "Not Secure" warning the user has
 # to click through once.

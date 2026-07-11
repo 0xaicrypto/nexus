@@ -12,7 +12,7 @@ each lesson):
      (The bug that motivated this whole CICD pass.)
 
   2. setuptools `packages = ["nexus_server"]` instead of `find:` →
-     subpackages (nexus_server.auth, nexus_server.passkey_page) not
+     subpackages (e.g. nexus_server.auth) not
      installed → ModuleNotFoundError at server startup.
 
   3. Dockerfile `pip install -e ./packages/sdk` → editable install

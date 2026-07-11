@@ -235,8 +235,7 @@ export default function App() {
   // F23 — NEVER render ``null`` as the inner child. A black window
   // with no UI is the worst possible state for the medic; if we
   // can't tell which view to show, default to LoginView so they at
-  // least have a recover surface (passkey, display-name auth,
-  // diagnostics panel). The auto-login still races and will swap
+  // least have a recover surface (password auth, diagnostics panel). The auto-login still races and will swap
   // in MainShell the moment it returns a token.
   return (
     <BootGate>

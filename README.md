@@ -89,7 +89,7 @@ going well.
 └────────────┬────────────┘   127.0.0.1:8001
              │ HTTP + JWT, SSE for /agent/chat
 ┌────────────▼────────────┐
-│  Server (FastAPI)       │   passkey + JWT auth, multi-tenant
+│  Server (FastAPI)       │   password (bcrypt) + JWT auth, multi-tenant
 │   (packages/server)     │   plus the clinical workflow stack:
 │   one DigitalTwin per   │   patients, DICOM, MONAI, clinical
 │   logged-in user        │   event-sourcing graph, research
@@ -257,7 +257,7 @@ that pin the canonical encoding live in
 |---|---|---|
 | `nexus_core` (SDK) | BSC web3, append-only logs, contract spec parsing, LLM provider abstraction | agents, users, HTTP, JWT |
 | `nexus` (framework) | DigitalTwin lifecycle, 9-step chat flow, evolution scheduling, projection mode | HTTP, JWT, multi-tenancy |
-| `nexus_server` | FastAPI routes, WebAuthn passkeys, one twin per user, view-shape APIs | how chat works inside a turn (delegated to `twin.chat()`) |
+| `nexus_server` | FastAPI routes, username + password (bcrypt) + JWT auth, one twin per user, view-shape APIs | how chat works inside a turn (delegated to `twin.chat()`) |
 | `RuneDesktop.*` | Avalonia views, view models, JWT lifetime | persistence (server is the source of truth) |
 
 Imports flow strictly downward — SDK never imports framework, framework

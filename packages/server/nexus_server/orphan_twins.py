@@ -1,7 +1,7 @@
 """Orphan twin recovery — #105 follow-up to #101.
 
 Users on the local desktop sometimes end up with multiple user_ids on
-the same machine — typically because the passkey-page UI defaulted to
+the same machine — typically because the legacy login UI defaulted to
 "Create Account" instead of "Sign In" (fixed in #101), so a returning
 user accidentally registered a fresh account and their old chat
 history became invisible (it's still on disk under

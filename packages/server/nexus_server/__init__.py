@@ -2,7 +2,7 @@
 
 A FastAPI application that serves four concerns:
 
-* **Auth** — passkey + JWT (``nexus_server.auth``).
+* **Auth** — username + password (bcrypt) + JWT (``nexus_server.auth``).
 * **Chat** — ``/api/v1/llm/chat`` routes through a per-user
   :class:`nexus.DigitalTwin`; attachments are distilled via
   :mod:`nexus_core.distiller` (``nexus_server.llm_gateway`` +

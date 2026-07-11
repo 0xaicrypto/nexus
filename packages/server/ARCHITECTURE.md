@@ -30,7 +30,7 @@ HTTP / browser ─┤  FastAPI app (main.py)    │
    llm_gateway              twin_event_log          idle reaper,
    chain_proxy                                 chain bootstrap,
    files / user_profile                        chain activity log)
-   passkey_page                                       │
+            │                                         │
             │                                         │
             └──────────────────┬──────────────────────┘
                                ▼
@@ -49,7 +49,7 @@ HTTP / browser ─┤  FastAPI app (main.py)    │
 | `config.py` | Settings dataclass, `NEXUS_USE_TWIN`, `NEXUS_TWIN_BASE_DIR`, etc. | – |
 | `database.py` | SQLite init for the auth/users DB. The legacy `sync_events` mirror table was dropped in Phase B. | – |
 | `middleware.py` | Rate limiting, shared utilities | – |
-| `auth/` (real package, Phase C) | Passkey + JWT — `routes.py`, `passkey_page.py`. `get_current_user` dependency, `create_jwt_token`. | `/api/v1/auth/*`, `/passkey` |
+| `auth/` (real package, Phase C) | Username + password (bcrypt) + JWT — `routes.py`. `get_current_user` dependency, `create_jwt_token`. | `/api/v1/auth/*` |
 | `llm_gateway.py` | `/api/v1/llm/chat` — looks up the user's twin and delegates to `twin.chat()`. Validates attachment caps. | `POST /api/v1/llm/chat` |
 | `attachment_distiller.py` | Thin shim over `nexus_core.distiller`. Server-side `record_distilled_event` was removed (Phase B); summaries ride back inline in the chat response. | – |
 | `files.py` | Per-user file picker + upload | `POST /api/v1/files/upload` |

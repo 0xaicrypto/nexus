@@ -70,8 +70,6 @@ set_env() {
 }
 
 set_env "HOSTNAME"          "$NIP_HOSTNAME"
-set_env "WEBAUTHN_RP_ID"    "$NIP_HOSTNAME"
-set_env "WEBAUTHN_ORIGIN"   "https://$NIP_HOSTNAME"
 set_env "CORS_ALLOW_ORIGINS" "https://$NIP_HOSTNAME"
 
 # ── Step 4: SERVER_SECRET ────────────────────────────────────────────

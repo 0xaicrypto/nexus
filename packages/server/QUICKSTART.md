@@ -23,8 +23,6 @@ Create `packages/server/.env`:
 SERVER_SECRET=local-jwt-secret-change-me
 GEMINI_API_KEY=AIza...
 DATABASE_URL=sqlite:///./nexus_server.db
-WEBAUTHN_RP_ID=localhost
-WEBAUTHN_ORIGIN=http://localhost:8001
 
 # Custodial chain mode (optional)
 SERVER_PRIVATE_KEY=0x...   # leave unset to disable chain writes
@@ -55,11 +53,15 @@ Run the regression suite:
 pytest tests/                # 64 tests, ~3s
 ```
 
-Quick smoke probe with curl (after registering a passkey via the
-`/passkey` browser flow and capturing the JWT):
+Quick smoke probe with curl (after registering a user and capturing
+the JWT):
 
 ```bash
-TOKEN="..."  # JWT from passkey login
+# Register (first user becomes admin) and capture the JWT
+TOKEN=$(curl -s -X POST http://localhost:8001/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"dev","password":"Str0ng-Pass-123"}' | python3 -c \
+  'import json,sys; print(json.load(sys.stdin)["jwt_token"])')
 
 # Chat → routes through DigitalTwin
 curl -X POST http://localhost:8001/api/v1/llm/chat \

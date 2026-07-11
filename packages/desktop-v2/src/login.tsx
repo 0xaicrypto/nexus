@@ -21,7 +21,6 @@
  *   - Sidecar diagnostics panel (polls get_sidecar_diagnostics every
  *     2 s; auto-expands on error / dead sidecar).
  *   - "Continue without server" offline escape hatch.
- *   - Passkey sign-in as a secondary option (endpoints unchanged).
  */
 
 import { useEffect, useState, type FormEvent } from 'react';
@@ -105,10 +104,6 @@ export function LoginView() {
   const [busy, setBusy]         = useState(false);
   const [error, setError]       = useState<string | null>(null);
   const [allowMock, setAllowMock] = useState(false);
-  // Separate busy flag for the passkey flow — the password form
-  // doesn't share lockout (medic could legitimately abandon a stalled
-  // passkey ceremony and fall back to the password flow).
-  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   // One-shot consume of the switcher's username prefill.
   useEffect(() => {
@@ -280,34 +275,7 @@ export function LoginView() {
     showToast('Continuing in offline / mock mode', 'info');
   }
 
-  /** Passkey sign-in (secondary option; endpoints unchanged). */
-  async function onPasskey() {
-    setError(null);
-    setPasskeyBusy(true);
-    try {
-      const r = await api.passkeyAuth('login', username);
-      setToken(r.token);
-      if (username.trim()) setStoreDisplayName(username.trim());
-      try {
-        const list = await api.listIdentities();
-        setIdentities(list.identities);
-        if (list.activeUserId) setActiveUserId(list.activeUserId);
-      } catch { /* non-fatal */ }
-      showToast(t('login.signIn'), 'success');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('timed out')) {
-        setError(t('login.passkey.cancelled'));
-      } else {
-        setError(t('login.passkey.error', { error: msg }));
-      }
-      setAllowMock(true);
-    } finally {
-      setPasskeyBusy(false);
-    }
-  }
-
-  const anyBusy = busy || passkeyBusy;
+  const anyBusy = busy;
 
   const tabBtn = (m: 'login' | 'register', label: string) => (
     <button
@@ -448,28 +416,6 @@ export function LoginView() {
                     ? (busy ? t('auth.signingIn')  : t('auth.signIn'))
                     : (busy ? t('auth.registering') : t('auth.registerCta'))}
                 </Button>
-
-                {/* Passkey — secondary option (WebAuthn ceremony in a
-                    popup; see api.passkeyAuth). */}
-                <div className="flex items-center gap-2 pt-1 text-caption text-text-tertiary">
-                  <div className="h-px flex-1 bg-border" />
-                  <span>{t('login.passkey.divider')}</span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                <Button
-                  type="button"
-                  variant="subtle"
-                  disabled={anyBusy}
-                  className="w-full"
-                  onClick={onPasskey}
-                >
-                  🔑 {passkeyBusy
-                    ? t('login.passkey.signingIn')
-                    : t('login.passkey.signIn')}
-                </Button>
-                <p className="-mt-1 text-[11px] text-text-tertiary">
-                  {t('login.passkey.signinHint')}
-                </p>
 
                 {allowMock && (
                   <button

@@ -74,7 +74,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
             display_name TEXT NOT NULL,
-            passkey_credential TEXT,
+            passkey_credential TEXT,  -- LEGACY: retired passkey auth; column kept for existing DBs, no code reads/writes it
             jwt_secret TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL,
             updated_at TIMESTAMP NOT NULL,

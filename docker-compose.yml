@@ -7,11 +7,10 @@
 #                     a domain (you'll need ${PUBLIC_IP}.nip.io to
 #                     resolve to your VPS).
 #
-# WebAuthn passkey requires HTTPS unless the origin is localhost. With
-# IP-only deployment the trick is to use a "hostname-encoded" service
-# like nip.io (or sslip.io / xip.io). $PUBLIC_IP=1.2.3.4 →
-# https://1-2-3-4.nip.io routes to your VPS, gets a real Let's Encrypt
-# cert, and WebAuthn treats it as a normal HTTPS origin.
+# Remote access should run over HTTPS. With IP-only deployment the
+# trick is to use a "hostname-encoded" service like nip.io (or
+# sslip.io / xip.io). $PUBLIC_IP=1.2.3.4 → https://1-2-3-4.nip.io
+# routes to your VPS and gets a real Let's Encrypt cert.
 
 services:
   nexus-server:

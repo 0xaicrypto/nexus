@@ -53,7 +53,7 @@ router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
 
 # Keys we let the desktop set. Intentionally narrow — billing /
-# webauthn / rate-limit settings are not surfaced (they're deploy-level,
+# rate-limit settings are not surfaced (they're deploy-level,
 # not per-medic). DEFAULT_LLM_* are settable so the desktop can switch
 # provider in one round-trip.
 ALLOWED_KEYS = {

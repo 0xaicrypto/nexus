@@ -9,8 +9,6 @@ _test_db = os.path.join(tempfile.gettempdir(), "rune_test.db")
 os.environ["SERVER_SECRET"] = "test-secret-key"
 os.environ["GEMINI_API_KEY"] = "fake-key-for-testing"
 os.environ["DATABASE_URL"] = f"sqlite:///{_test_db}"
-os.environ["WEBAUTHN_RP_ID"] = "localhost"
-os.environ["WEBAUTHN_ORIGIN"] = "http://localhost:8001"
 # Phase B: the anchor retry daemon was removed. ``NEXUS_DISABLE_RETRY_DAEMON``
 # used to exist here for test determinism — no longer needed; main.py
 # doesn't start a daemon at all.

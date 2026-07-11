@@ -527,8 +527,8 @@ fn spawn_backend_sidecar(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
     };
     sidecar = sidecar
         // F-bind-127 — bind to deterministic IPv4 loopback. F19
-        // experimented with the DNS name ``localhost`` to please
-        // WebAuthn, but on macOS / dual-stack systems ``localhost``
+        // experimented with the DNS name ``localhost``, but on macOS
+        // / dual-stack systems ``localhost``
         // can resolve to BOTH 127.0.0.1 (IPv4) and ::1 (IPv6).
         // uvicorn binds to whichever the resolver returns first; if
         // the browser then tries the other address we get an opaque
@@ -538,9 +538,8 @@ fn spawn_backend_sidecar(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
         // baseUrl is still ``http://localhost:8001`` (DNS name). The
         // browser's resolver maps ``localhost`` to 127.0.0.1 (default
         // priority on macOS / Win / most Linux) and hits the bound
-        // socket. WebAuthn remains happy because the page's effective
-        // domain is still ``localhost`` (the URL), regardless of the
-        // socket address.
+        // socket. The page's effective domain is still ``localhost``
+        // (the URL), regardless of the socket address.
         .env("NEXUS_HOST", "127.0.0.1")
         .env("NEXUS_PORT", "8001")
         // CORS: the bundled webview runs from tauri://localhost (or

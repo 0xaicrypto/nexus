@@ -17,11 +17,11 @@ The end state: agents run on your VPS, persist their state across container rebu
 
 ## Why nip.io for HTTPS without a domain
 
-WebAuthn passkeys legally require HTTPS unless the origin is `localhost`. If you don't own a domain, the canonical workaround is **nip.io**: a free DNS service that resolves `1-2-3-4.nip.io` to `1.2.3.4`. Let's Encrypt issues real certificates for nip.io subdomains, so Caddy gets you proper HTTPS automatically.
+Remote deployments should serve auth traffic over HTTPS. If you don't own a domain, the canonical workaround is **nip.io**: a free DNS service that resolves `1-2-3-4.nip.io` to `1.2.3.4`. Let's Encrypt issues real certificates for nip.io subdomains, so Caddy gets you proper HTTPS automatically.
 
 The alternative — self-signed certs — works but the desktop's embedded WebView treats them as untrusted, and recovering from that is a worse user experience than just using nip.io.
 
-If you later get a real domain, change `HOSTNAME` in `.env.production`, re-run `docker compose up -d`, Caddy provisions a new cert, and existing passkeys break (they're bound to the old RP_ID — that's a WebAuthn property, not a deploy issue).
+If you later get a real domain, change `HOSTNAME` in `.env.production`, re-run `docker compose up -d`, and Caddy provisions a new cert.
 
 ---
 
@@ -67,8 +67,6 @@ nano .env.production
 
 Change at minimum:
 - `HOSTNAME` → `<your-ip-with-dashes>.nip.io` (e.g. `203-0-113-7.nip.io`)
-- `WEBAUTHN_RP_ID` → same hostname
-- `WEBAUTHN_ORIGIN` → `https://<hostname>`
 - `CORS_ALLOW_ORIGINS` → `https://<hostname>`
 - `SERVER_SECRET` → output of `openssl rand -hex 32`
 - `GEMINI_API_KEY` → your key
@@ -199,7 +197,7 @@ docker compose exec nexus-server bash
 - `SERVER_SECRET` is the JWT signing key — treat it like a password. Don't commit `.env.production`.
 - Caddy uses Let's Encrypt's prod ACME endpoint. If you're testing repeatedly, switch to staging in the Caddyfile to avoid rate limits.
 - The `/llm/chat` endpoint is per-user rate-limited via `RATE_LIMIT_LLM_REQUESTS_PER_MINUTE`. Tune for your traffic.
-- **CORS** is locked to your hostname; the desktop client itself is non-browser HTTP so it doesn't matter for desktop, but the embedded WebView (passkey ceremony) does need it.
+- **CORS** is locked to your hostname; the desktop client itself is non-browser HTTP so it doesn't matter for desktop, but any browser-based access does need it.
 - BSC chain integration is **opt-in** — set `SERVER_PRIVATE_KEY` + `CHAIN_RPC_URL` to enable. Without those the server runs in local mode (no on-chain anchoring).
 
 ---
@@ -211,9 +209,6 @@ Port 80 isn't reachable from the public internet. Check VPS firewall + cloud pro
 
 **Browser/desktop says "Your connection is not private"**  
 Likely you set `HOSTNAME` to something nip.io can't resolve (typo) or your VPS IP changed and the cert is for the old one. `docker compose down && rm -rf <caddy-data-volume>/* && docker compose up -d` to force re-issuance.
-
-**Passkey registration says "RP ID mismatch"**  
-`WEBAUTHN_RP_ID` must equal the hostname *exactly* — no scheme, no port, no trailing slash. After fixing, every existing passkey is invalidated (WebAuthn binds credentials to the RP).
 
 **Agent says "npx not found" when installing an MCP server**  
 You're on an old Docker image. `docker compose build --no-cache` to rebuild from scratch — Node 20 is in the runtime stage.

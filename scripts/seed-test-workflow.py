@@ -412,7 +412,7 @@ def main() -> int:
         if not rows:
             sys.stderr.write(
                 "\nERROR: no users in the database. Log into Nexus "
-                "with your passkey once, then re-run.\n"
+                "with your username + password once, then re-run.\n"
             )
             return 1
         user_id = rows[0]["id"]

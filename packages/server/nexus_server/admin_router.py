@@ -64,7 +64,6 @@ class AdminUserInfo(BaseModel):
     disabled_at: Optional[str] = None
     last_login_at: Optional[str] = None
     has_password: bool = False
-    has_passkey: bool = False
 
 
 class AdminUsersListResponse(BaseModel):
@@ -95,7 +94,7 @@ def _fetch_user(conn, user_id: str):
     conn.row_factory = sqlite3.Row
     return conn.execute(
         "SELECT id, display_name, role, created_at, disabled_at, "
-        "       last_login_at, password_hash, passkey_credential "
+        "       last_login_at, password_hash "
         "FROM users WHERE id = ? AND deleted_at IS NULL",
         (user_id,),
     ).fetchone()
@@ -122,7 +121,7 @@ async def list_users(
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT id, display_name, role, created_at, disabled_at, "
-            "       last_login_at, password_hash, passkey_credential "
+            "       last_login_at, password_hash "
             "FROM users WHERE deleted_at IS NULL "
             "ORDER BY created_at ASC"
         ).fetchall()
@@ -135,7 +134,6 @@ async def list_users(
             disabled_at=r["disabled_at"],
             last_login_at=r["last_login_at"],
             has_password=r["password_hash"] is not None,
-            has_passkey=r["passkey_credential"] is not None,
         )
         for r in rows
     ])

@@ -1,6 +1,6 @@
 """Regression tests for rune-server.
 
-Covers: auth, LLM gateway format, sync endpoints, config, passkey page.
+Covers: auth, LLM gateway format, sync endpoints, config.
 All tests use mocked LLM calls — no real API keys needed.
 """
 import json
@@ -188,24 +188,6 @@ class TestSyncEndpointsRetired:
             importlib.import_module("nexus_server.sync_hub")
 
 
-# ── Passkey Page ──────────────────────────────────────────────────────
-
-
-class TestPasskeyPage:
-    def test_passkey_page_returns_html(self, client):
-        resp = client.get("/auth/passkey-page")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
-        assert "Nexus" in resp.text
-        assert "SimpleWebAuthnBrowser" in resp.text
-
-    def test_passkey_page_contains_webauthn_js(self, client):
-        resp = client.get("/auth/passkey-page")
-        assert resp.status_code == 200
-        assert "rune-callback://" in resp.text
-        assert "startAuthentication" in resp.text or "handleLogin" in resp.text
-
-
 # ── Config ────────────────────────────────────────────────────────────
 
 
@@ -275,101 +257,6 @@ class TestMonorepoIntegration:
         assert len(framework_modules) == 0, (
             f"Server eagerly imported Nexus framework modules: {framework_modules}"
         )
-
-
-# ── Passkey Login: credential ID → user lookup ────────────────────────
-
-
-class TestPasskeyLoginFinish:
-    """Verify login/finish resolves the *right* user from a passkey assertion.
-
-    The previous implementation fell back to "most recent user" whenever the
-    provided user_id did not match a row — that silently logged a returning
-    user into someone else's account. The current behavior:
-
-      1. Direct match: request.user_id == users.id  → that user
-      2. Credential match: assertion.id == passkey_credential.id  → that user
-      3. Otherwise → 404
-    """
-
-    def _register_user(self, client, name="PasskeyUser"):
-        resp = client.post("/api/v1/auth/register", json={"username": name, "password": "Str0ng-Pass-123"})
-        assert resp.status_code == 201
-        return resp.json()
-
-    def _register_with_passkey(self, client, name, credential_id):
-        """Register via the WebAuthn flow so passkey_credential is populated."""
-        start = client.post(
-            "/api/v1/auth/passkey/register/start",
-            json={"display_name": name},
-        )
-        assert start.status_code == 200
-        user_id = start.json()["user_id"]
-        finish = client.post(
-            "/api/v1/auth/passkey/register/finish",
-            json={
-                "user_id": user_id,
-                "display_name": name,
-                "credential": {"id": credential_id, "rawId": credential_id, "type": "public-key"},
-            },
-        )
-        assert finish.status_code == 200
-        return user_id
-
-    def test_login_finish_with_valid_user_id(self, client):
-        """Login finish works when correct user_id is provided directly."""
-        reg = self._register_user(client)
-        resp = client.post("/api/v1/auth/passkey/login/finish", json={
-            "user_id": reg["user_id"],
-            "assertion": {"id": "irrelevant-credential-id"},
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "jwt_token" in data
-        assert data["expires_in_seconds"] > 0
-
-    def test_login_finish_resolves_user_via_credential_id(self, client):
-        """When the user_id field is actually a credential id (current FE
-        behavior), the server should match against passkey_credential.id."""
-        cred_id = "Qg7T-credential-id-aaa"
-        user_id = self._register_with_passkey(client, "AliceWithPasskey", cred_id)
-
-        resp = client.post("/api/v1/auth/passkey/login/finish", json={
-            # FE today sends assertion.id in user_id; mirror that here
-            "user_id": cred_id,
-            "assertion": {"id": cred_id},
-        })
-        assert resp.status_code == 200
-        # Verify it logged in as Alice, not whoever was registered last
-        token = resp.json()["jwt_token"]
-        import jwt as _jwt
-        unverified = _jwt.decode(token, options={"verify_signature": False})
-        assert unverified["user_id"] == user_id
-
-    def test_login_finish_does_not_fall_back_to_recent_user(self, client):
-        """Regression: an unknown credential id must NOT silently log in as the
-        most recently registered user (previous behavior, security hole)."""
-        # Register Alice (will become "most recent" at the moment of her call)
-        self._register_with_passkey(client, "Alice", "credential-alice")
-        # Register Bob (now most recent)
-        self._register_with_passkey(client, "Bob", "credential-bob")
-
-        resp = client.post("/api/v1/auth/passkey/login/finish", json={
-            "user_id": "credential-charlie-does-not-exist",
-            "assertion": {"id": "credential-charlie-does-not-exist"},
-        })
-        assert resp.status_code == 404
-        # Server's global handler maps HTTPException.detail -> "error"
-        body = resp.json()
-        assert "register" in (body.get("error") or body.get("detail") or "").lower()
-
-    def test_login_finish_no_users_returns_404(self, client):
-        """Login finish returns 404 when no users exist at all."""
-        resp = client.post("/api/v1/auth/passkey/login/finish", json={
-            "user_id": "nobody",
-            "assertion": {},
-        })
-        assert resp.status_code == 404
 
 
 # ── Server .env Loading ───────────────────────────────────────────────
@@ -791,12 +678,13 @@ class TestUserPersistence:
         reg = client.post("/api/v1/auth/register", json={"username": "PersistUser", "password": "Str0ng-Pass-123"})
         user_id = reg.json()["user_id"]
 
-        # Verify user can be found via login/finish
-        resp = client.post("/api/v1/auth/passkey/login/finish", json={
-            "user_id": user_id,
-            "assertion": {},
+        # Verify the user can log back in with the same credentials
+        resp = client.post("/api/v1/auth/login", json={
+            "username": "PersistUser",
+            "password": "Str0ng-Pass-123",
         })
         assert resp.status_code == 200
+        assert resp.json()["user_id"] == user_id
 
     def test_multiple_users_isolated(self, client):
         """Different users get different JWT tokens."""
@@ -1158,7 +1046,7 @@ class TestChainProxy:
 
     def test_register_agent_accepts_missing_agent_name(self, client):
         """The desktop currently doesn't surface a name input on the
-        passkey-only login flow, so it sends an empty string. Server
+        login flow, so it sends an empty string. Server
         must NOT 422 — it should fall back to the user's display_name.
         Regression for the 'Connected · chain register failed: 422'
         bug seen in the desktop top bar."""

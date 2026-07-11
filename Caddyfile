@@ -6,7 +6,7 @@
 #
 # For IP-only VPS deploys we use nip.io: any 4-digit IP encoded as
 # "1-2-3-4.nip.io" resolves to that IP. Let's Encrypt issues a cert
-# for nip.io subdomains, so WebAuthn passkeys work just like a real
+# for nip.io subdomains, so HTTPS works just like with a real
 # domain. Set HOSTNAME=1-2-3-4.nip.io in .env.production where 1.2.3.4
 # is your VPS public IP.
 

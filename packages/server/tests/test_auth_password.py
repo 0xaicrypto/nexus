@@ -206,7 +206,6 @@ def test_admin_list_users(client):
     assert users["bob"]["role"] == "user"
     assert users["admin1"]["has_password"] is True
     assert users["legacy"]["has_password"] is False
-    assert users["legacy"]["has_passkey"] is False
     assert users["admin1"]["last_login_at"] is not None
     assert users["bob"]["disabled_at"] is None
 

@@ -16,7 +16,7 @@ difference between "this works" and "I'm in the wrong codepath".
 
 ```
                             ┌─────────────────┐
-   passkey login            │                 │
+   password login           │                 │
   ──────────────────────────▶   server.users   │
                             │  table row      │
                             │                 │

@@ -181,7 +181,7 @@ async def patch_user_profile(
     other backends, so we build the UPDATE statement explicitly.
 
     Email is intentionally NOT mutable here — it's bound to the
-    passkey credential the user signed up with. Tier / status flow
+    account the user signed up with. Tier / status flow
     through the billing webhook + admin approval routes, not the
     user-facing profile endpoint.
     """

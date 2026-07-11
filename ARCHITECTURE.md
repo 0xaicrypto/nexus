@@ -116,8 +116,8 @@ is just one way to expose it.
 
 ### Server — `packages/server/nexus_server/`
 
-**Knows about**: HTTP routes, JWT verification, WebAuthn passkeys,
-multi-tenancy (one twin per user), rate limiting, CORS, the desktop's
+**Knows about**: HTTP routes, JWT verification, username + password
+auth (bcrypt), multi-tenancy (one twin per user), rate limiting, CORS, the desktop's
 view-shape API endpoints, the desktop's onboarding flow, and the entire
 clinical workflow stack: patient registry, DICOM ingestion + viewer
 bridge, MONAI segmentation runtime, the clinical event-sourcing graph,
@@ -144,7 +144,7 @@ billing, scheduling, clinical graph projection, etc.
 
 **Knows about**: rendering chat (Today / Patient / Research workspace
 modes), DICOM viewer launch, file picker UI, polling endpoints for status,
-passkey authentication on launch.
+username + password authentication on launch.
 
 **Doesn't know about**: chat history (pulled from server every login),
 memories (rendered from server), anchors (rendered from server), agent

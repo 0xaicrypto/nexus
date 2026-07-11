@@ -41,7 +41,7 @@ class ChainAgentRegisterRequest(BaseModel):
     ``agent_name`` is optional: when omitted (or blank) the server falls
     back to the authenticated user's stored ``display_name`` so the
     desktop client doesn't have to plumb a separate "what should we
-    register you as?" prompt through the passkey-only flow.
+    register you as?" prompt through the login flow.
     """
 
     agent_name: Optional[str] = Field(default=None, max_length=255)
