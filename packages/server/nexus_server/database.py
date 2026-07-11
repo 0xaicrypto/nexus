@@ -591,6 +591,27 @@ def init_db() -> None:
         "CREATE INDEX IF NOT EXISTS idx_doc_snapshots_doc "
         "ON doc_snapshots(user_id, doc_id, id DESC)"
     )
+    # doc_chat_messages — conversational co-writing transcript. One row
+    # per turn; ``doc_applied`` marks assistant turns whose <doc> block
+    # was applied to the document body (writing_router chat endpoint).
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS doc_chat_messages (
+            id          TEXT PRIMARY KEY,
+            doc_id      TEXT NOT NULL,
+            user_id     TEXT NOT NULL,
+            role        TEXT NOT NULL,               -- 'user' | 'assistant'
+            text        TEXT NOT NULL DEFAULT '',
+            doc_applied INTEGER NOT NULL DEFAULT 0,
+            created_at  TIMESTAMP NOT NULL,
+            FOREIGN KEY (doc_id) REFERENCES docs(id)
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_doc_chat_messages_doc "
+        "ON doc_chat_messages(user_id, doc_id, created_at)"
+    )
 
     # ── user_skill_prefs (skills management API) ────────────────────
     # Per-user enabled/disabled + auto_apply overlay on installed

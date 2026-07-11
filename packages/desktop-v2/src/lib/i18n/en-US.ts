@@ -830,6 +830,31 @@ export const en = {
 
   // Writing Studio — TipTap editor (P2). New keys go at the dict END.
   'writing.chip.deidentified':     'De-identified',
+
+  // Writing Studio — conversational co-writing (P3): chat panel +
+  // document canvas. New keys go at the dict END.
+  'writing.chat.title':          'Co-writing chat',
+  'writing.chat.empty':          'Chat with the AI to draft and revise this document — it can rewrite the canvas directly.',
+  'writing.chat.placeholder':    'Describe what to write or change. Type @ to reference a patient / study…',
+  'writing.chat.loadFailed':     'Failed to load chat: {error}',
+  'writing.chat.failed':         'Chat failed: {error}',
+  'writing.chat.docApplied':     'Document updated',
+  'writing.chat.undoRevision':   'Undo this revision',
+  'writing.chat.revising':       'Rewriting document…',
+  'writing.revision.banner':     'AI revised the document',
+  'writing.revision.viewDiff':   'View diff',
+  'writing.revision.undo':       'Undo',
+  'writing.revision.keep':       'Keep',
+  'writing.revision.diffTitle':  'Revision diff',
+  'writing.revision.warnChip':   'Unverified numbers',
+  'writing.canvas.locked':       'Locked while the chat is revising the document',
+  'writing.drawer.title':        'References & snapshots',
+  'writing.starter.title':       'Start writing with the chat',
+  'writing.starter.t1':          'Draft a case report (citing patient references)',
+  'writing.starter.t2':          'Draft a mid-study interim abstract',
+  'writing.starter.t3':          'Expand my bullet points into paragraphs',
+  'writing.docs.collapse':       'Collapse document list',
+  'writing.docs.expand':         'Expand document list',
 };
 
 /** ``Dict`` is the contract every locale file must satisfy: same set

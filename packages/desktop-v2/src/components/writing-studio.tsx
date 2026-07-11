@@ -1,16 +1,31 @@
 /**
- * Writing Studio (P1) — 写作 workspace.
+ * Writing Studio (P3) — 写作 workspace, conversational co-writing.
  *
- * Three columns (mock1_writing_panel.svg):
- *   left   — document list (create / select / delete)
- *   center — title + TipTap editor ({{ref:ID}} tokens as inline
- *            refChip atoms), polish toolbar, streamed diff card,
- *            status bar (autosave / word count)
- *   right  — 引用与来源 reference chips + 快照历史 snapshots
+ * Three columns (chat + canvas, ChatGPT-Canvas style):
+ *   left   — document list (create / select / delete; collapsible)
+ *   middle — 写作对话 chat panel (~420px): transcript from
+ *            GET /docs/{id}/chat rendered with the shared MessageRow
+ *            + ChatComposer; each turn POSTs /docs/{id}/chat (SSE)
+ *            and can rewrite the whole document.
+ *   right  — the document CANVAS (flex): title + TipTap editor with
+ *            a compact collapsible 引用与快照 drawer at the top,
+ *            polish toolbar, streamed diff card, status bar.
  *
  * Flows:
+ *   对话共写     → POST /docs/{id}/chat (SSE). reply_chunk streams into
+ *                  the assistant bubble; doc_chunk frames are buffered
+ *                  server-side text (never live-typed into TipTap); on
+ *                  done{doc_body} the SERVER has already applied the
+ *                  new body and snapshotted the previous one, so the
+ *                  canvas just swaps content and a revision banner
+ *                  offers 查看差异 (read-only word-diff modal) / 撤销
+ *                  (restore the pre-revision snapshot). The canvas is
+ *                  locked read-only while a turn streams, so
+ *                  draft-vs-server conflicts can't happen.
  *   @ / ＋引用   → ReferencePickerModal (mock2) → POST /docs/{id}/references
- *                  → insert a refChip atom at the caret.
+ *                  → insert a refChip atom at the caret (editor), or —
+ *                  when triggered from the chat composer — append the
+ *                  chip label to the message as a context mention.
  *   选中润色     → activated toolbar row → POST /docs/{id}/polish (SSE)
  *                  → word-level diff card (mock3) with per-hunk ✓/✗.
  *   导出 docx    → POST /docs/{id}/export; on 422 phi_unresolved the
@@ -32,8 +47,9 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, AtSign, Check, Download, Eye, PenLine, Plus,
-  RefreshCw, RotateCcw, Sparkles, Trash2, X,
+  AlertTriangle, AtSign, Check, ChevronDown, ChevronRight, Download,
+  Eye, PanelLeftClose, PanelLeftOpen, PenLine, Plus, RefreshCw,
+  RotateCcw, Sparkles, Trash2, X,
 } from 'lucide-react';
 import { EditorContent, useEditor, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -42,7 +58,7 @@ import {
   type WritingDocMeta, type WritingPhiFinding, type WritingPhiResolution,
   type WritingRefGranularity, type WritingReference, type WritingSnapshot,
 } from '../lib/api-client';
-import { useAppState } from '../store';
+import { useAppState, type WritingChatMsg } from '../store';
 import { cn, patientDisplayLabel } from '../lib/util';
 import { useT } from '../lib/i18n';
 import type { Dict } from '../lib/i18n/en-US';
@@ -56,6 +72,8 @@ import {
   parseBodyToDoc, REF_TOKEN_RE, serializeDocToBody, type SerialDocNode,
 } from '../lib/writing-doc-serial';
 import { RefChip, RefChipProvider, refChipLeafText } from './ref-chip';
+import { MessageRow } from './chat-message';
+import { ChatComposer } from './chat-composer';
 
 /* ───────────────────────── helpers ───────────────────────── */
 
@@ -151,6 +169,11 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** F-draft-persist key for a doc's chat composer text (store.drafts). */
+function chatDraftKey(docId: string): string {
+  return `writing-chat-${docId}`;
+}
+
 const GRANULARITY_LABEL_KEY: Record<WritingRefGranularity, keyof Dict> = {
   basics:   'writing.picker.gBasics',
   timeline: 'writing.picker.gTimeline',
@@ -176,11 +199,27 @@ interface PolishState {
   accepted: boolean[];
 }
 
-interface PickerRequest {
-  /** ProseMirror position where the chip goes. */
-  pmPos: number;
-  /** True when triggered by typing '@' — that char gets replaced. */
-  replaceAt: boolean;
+type PickerRequest =
+  /** From the editor: the chip atom goes at ``pmPos``. ``replaceAt``
+   *  is true when triggered by typing '@' — that char gets replaced. */
+  | { kind: 'editor'; pmPos: number; replaceAt: boolean }
+  /** From the chat composer: the reference is attached to the doc
+   *  (POST /references) and its chip label is appended to the draft
+   *  message as a context mention. */
+  | { kind: 'chat' };
+
+/** One AI revision applied by a chat turn — drives the canvas
+ *  revision banner + the read-only diff modal. Kept per doc id so
+ *  switching documents doesn't lose the banner. */
+interface RevisionState {
+  /** word-diff of the pre-revision body vs the applied doc_body. */
+  segments: DiffSegment[];
+  /** Numbers flagged by the provenance_warning frame. */
+  warnings: string[];
+  /** Pre-revision snapshot — restoring it undoes this revision.
+   *  Null if the server didn't return one. */
+  snapshotId: string | null;
+  messageId: string;
 }
 
 /* ════════════════════════════════════════════════════════════════════
@@ -196,6 +235,16 @@ export function WritingStudio() {
   const setWritingDraft      = useAppState((s) => s.setWritingDraft);
   const clearWritingDraft    = useAppState((s) => s.clearWritingDraft);
   const showToast            = useAppState((s) => s.showToast);
+  const storeSetDraft        = useAppState((s) => s.setDraft);
+
+  // Co-writing chat — per-doc store state (survives doc / workspace
+  // switches mid-stream, mirroring chatMsgsBySession).
+  const chatStreaming = useAppState((s) =>
+    s.activeWritingDocId
+      ? !!s.writingChatStreamingByDoc[s.activeWritingDocId]
+      : false);
+  const chatMsgs = useAppState((s) =>
+    s.activeWritingDocId ? s.writingChatByDoc[s.activeWritingDocId] : undefined);
 
   const [docs, setDocs]             = useState<WritingDocMeta[]>([]);
   const [references, setReferences] = useState<WritingReference[]>([]);
@@ -214,6 +263,24 @@ export function WritingStudio() {
    *  sync from TipTap's selection via pmPosToOffset). */
   const [sel, setSel] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
   const [picker, setPicker] = useState<PickerRequest | null>(null);
+
+  // Layout: collapsible docs sidebar + the 引用与快照 drawer at the
+  // top of the canvas (they replaced the old right rail).
+  const [docsCollapsed, setDocsCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Co-writing revisions — banner + diff modal state, keyed by doc id
+  // so switching docs keeps each doc's last-revision banner.
+  const [revisions, setRevisions] = useState<Record<string, RevisionState>>({});
+  const [diffOpen, setDiffOpen] = useState(false);
+  /** Doc currently receiving doc_chunk frames (drives the 正在改写文档…
+   *  indicator in the canvas header). */
+  const [revisingDocId, setRevisingDocId] = useState<string | null>(null);
+  const revision = activeDocId ? revisions[activeDocId] : undefined;
+  /** Empty doc + empty (loaded) chat → centered starter templates. */
+  const starterVisible = !!activeDocId && draft !== undefined
+    && draft.body === '' && chatMsgs !== undefined
+    && chatMsgs.length === 0 && !chatStreaming;
 
   // Polish
   const [polish, setPolish] = useState<PolishState | null>(null);
@@ -275,7 +342,8 @@ export function WritingStudio() {
       handleKeyDown: (view, event) => {
         if (event.key === '@' && !event.metaKey && !event.ctrlKey && !event.altKey) {
           const pmPos = view.state.selection.from;
-          window.setTimeout(() => setPicker({ pmPos, replaceAt: true }), 0);
+          window.setTimeout(
+            () => setPicker({ kind: 'editor', pmPos, replaceAt: true }), 0);
         }
         return false;
       },
@@ -333,6 +401,13 @@ export function WritingStudio() {
     applyBodyToEditor(editor, draftBodyForSync);
   }, [editor, draftBodyForSync, applyBodyToEditor]);
 
+  // Canvas lock — while a chat turn is streaming the editor goes
+  // read-only (dim + tooltip), so the medic's typing can never race
+  // the server-applied doc_body (no draft-vs-server conflict).
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.setEditable(!chatStreaming);
+  }, [editor, chatStreaming]);
+
   /* ── doc list ─────────────────────────────────────────────── */
 
   const refreshDocs = useCallback(async () => {
@@ -357,6 +432,7 @@ export function WritingStudio() {
     setPicker(null);
     setPhiFindings(null);
     setPreviewMode(false);
+    setDiffOpen(false);
     setExcludedRefIds(new Set());
     setSaveState('idle');
     setSavedAt(null);
@@ -493,11 +569,33 @@ export function WritingStudio() {
 
   function openPickerFromToolbar() {
     if (!activeDocId || !editor) return;
-    setPicker({ pmPos: editor.state.selection.from, replaceAt: false });
+    setPicker({ kind: 'editor', pmPos: editor.state.selection.from, replaceAt: false });
   }
 
   function onReferenceInserted(ref: WritingReference) {
-    if (!activeDocId || !picker || !editor || editor.isDestroyed) {
+    if (!activeDocId || !picker) {
+      setPicker(null);
+      return;
+    }
+    if (picker.kind === 'chat') {
+      // Chat mention — the reference is already attached to the doc
+      // (the picker POSTed /references); the draft message just gets
+      // its chip label appended as a context mention. The trailing
+      // '@' the medic typed (if still there) is absorbed.
+      const key = chatDraftKey(activeDocId);
+      const cur = useAppState.getState().drafts[key] ?? '';
+      const mention = `@${ref.chipLabel}`;
+      const next = cur.endsWith('@')
+        ? `${cur.slice(0, -1)}${mention} `
+        : `${cur}${cur && !/\s$/.test(cur) ? ' ' : ''}${mention} `;
+      storeSetDraft(key, next);
+      setReferences((rs) => [...rs, ref]);
+      setDocs((ds) => ds.map((d) => d.id === activeDocId
+        ? { ...d, refCount: d.refCount + 1 } : d));
+      setPicker(null);
+      return;
+    }
+    if (!editor || editor.isDestroyed) {
       setPicker(null);
       return;
     }
@@ -522,6 +620,136 @@ export function WritingStudio() {
     setDocs((ds) => ds.map((d) => d.id === activeDocId
       ? { ...d, refCount: d.refCount + 1 } : d));
     setPicker(null);
+  }
+
+  /* ── co-writing chat ──────────────────────────────────────── */
+
+  /**
+   * One chat turn. All transcript mutations go through the store
+   * (keyed by doc id) so the stream survives doc / workspace switches;
+   * editor / save-state side effects only run if the doc is still
+   * active when the frame lands. Deliberately NOT abortable: once the
+   * server starts a turn it may apply a doc revision — abandoning the
+   * stream client-side would desync the canvas from the server copy.
+   */
+  async function sendChatTurn(text: string) {
+    if (!activeDocId) return;
+    const docId = activeDocId;
+    const st = useAppState.getState();
+    if (st.writingChatStreamingByDoc[docId]) return;
+
+    st.setWritingChatError(docId, null);
+    // Mark the transcript as hydrated so the panel's history fetch
+    // can't clobber the live turn.
+    if (st.writingChatByDoc[docId] === undefined) {
+      st.setWritingChatMsgs(docId, []);
+    }
+    const now = new Date().toISOString();
+    st.appendWritingChatMsg(docId, {
+      id: `local-user-${Date.now()}`, role: 'user', text,
+      docApplied: false, createdAt: now,
+    });
+    st.appendWritingChatMsg(docId, {
+      id: `local-assistant-${Date.now()}`, role: 'assistant', text: '',
+      docApplied: false, createdAt: now,
+    });
+    st.setWritingChatStreaming(docId, true);
+    st.setDraft(chatDraftKey(docId), '');
+
+    // provenance_warning arrives before done — buffer it. doc_chunk
+    // frames are NOT accumulated into the editor (no live typing);
+    // done.doc_body is the canonical applied text.
+    let warnings: string[] = [];
+    try {
+      for await (const frame of api.chatWritingDoc(
+        docId, { message: text, refIds: includedRefIds },
+      )) {
+        const g = useAppState.getState();
+        if (frame.type === 'reply_chunk') {
+          g.updateLastWritingChatMsg(docId, (last) => ({
+            text: last.text + frame.text,
+          }));
+        } else if (frame.type === 'doc_started') {
+          setRevisingDocId(docId);
+        } else if (frame.type === 'doc_chunk') {
+          // Buffered server-side; the canvas swaps once on done.
+        } else if (frame.type === 'provenance_warning') {
+          warnings = frame.numbers ?? [];
+        } else if (frame.type === 'done') {
+          g.updateLastWritingChatMsg(docId, {
+            id: frame.message_id,
+            text: frame.reply,
+            docApplied: frame.doc_body !== null,
+          });
+          if (frame.doc_body !== null) {
+            const newBody = frame.doc_body;
+            const snapId = frame.snapshot_id === null
+              || frame.snapshot_id === undefined
+              ? null : String(frame.snapshot_id);
+            if (snapId) g.setWritingChatSnapshot(frame.message_id, snapId);
+            const prevDraft = g.writingDrafts[docId];
+            const title = prevDraft?.title ?? '';
+            setRevisions((r) => ({
+              ...r,
+              [docId]: {
+                segments: diffWords(prevDraft?.body ?? '', newBody),
+                warnings,
+                snapshotId: snapId,
+                messageId: frame.message_id,
+              },
+            }));
+            // The server ALREADY applied doc_body + snapshotted the
+            // previous body — mirror it locally.
+            const stillActive = g.activeWritingDocId === docId;
+            if (stillActive && editor && !editor.isDestroyed) {
+              // Sets lastEditorBodyRef so the draft-sync effect no-ops.
+              applyBodyToEditor(editor, newBody);
+            }
+            g.setWritingDraft(docId, { title, body: newBody });
+            if (stillActive) {
+              lastSavedRef.current = { docId, title, body: newBody };
+              setSaveState('saved');
+              setSavedAt(fmtClock(new Date()));
+              try {
+                setSnapshots(await api.listWritingSnapshots(docId));
+              } catch { /* non-fatal — drawer refresh only */ }
+            }
+          }
+        } else if (frame.type === 'error') {
+          throw new Error(frame.message);
+        }
+      }
+    } catch (e) {
+      const g = useAppState.getState();
+      // Drop the empty assistant bubble (its reply never arrived) —
+      // the error renders as the inline row above the composer.
+      const cur = g.writingChatByDoc[docId] ?? [];
+      const last = cur[cur.length - 1];
+      if (last && last.role === 'assistant' && last.text === '' && !last.docApplied) {
+        g.setWritingChatMsgs(docId, cur.slice(0, -1));
+      }
+      g.setWritingChatError(
+        docId, t('writing.chat.failed', { error: errMsg(e) }));
+    } finally {
+      useAppState.getState().setWritingChatStreaming(docId, false);
+      setRevisingDocId((d) => (d === docId ? null : d));
+    }
+  }
+
+  /** Undo an AI revision — restore the pre-revision snapshot the
+   *  server minted for this chat turn, then drop the matching banner. */
+  async function onUndoRevision(snapshotId: string) {
+    if (!activeDocId) return;
+    const docId = activeDocId;
+    await onRestoreSnapshot(snapshotId);
+    setDiffOpen(false);
+    setRevisions((r) => {
+      const cur = r[docId];
+      if (!cur || cur.snapshotId !== snapshotId) return r;
+      const next = { ...r };
+      delete next[docId];
+      return next;
+    });
   }
 
   /* ── polish ───────────────────────────────────────────────── */
@@ -671,16 +899,29 @@ export function WritingStudio() {
 
   return (
     <div className="rw-root flex h-full w-full font-rw-display">
-      {/* left — documents */}
+      {/* left — documents (collapsible) */}
       <DocsSidebar
         docs={docs}
         activeDocId={activeDocId}
+        collapsed={docsCollapsed}
+        onToggleCollapsed={() => setDocsCollapsed((v) => !v)}
         onSelect={setActiveDocId}
         onNew={() => void onCreateDoc()}
         onDelete={setPendingDelete}
       />
 
-      {/* center — editor */}
+      {/* middle — 写作对话 chat panel */}
+      {activeDocId && draft !== undefined && (
+        <WritingChatPanel
+          docId={activeDocId}
+          streaming={chatStreaming}
+          onSend={(text) => void sendChatTurn(text)}
+          onAtTyped={() => setPicker({ kind: 'chat' })}
+          onUndoRevision={(sid) => void onUndoRevision(sid)}
+        />
+      )}
+
+      {/* right — document canvas */}
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-rw-bg">
         {!activeDocId || draft === undefined ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center">
@@ -708,15 +949,90 @@ export function WritingStudio() {
                   {previewMode ? t('writing.editor.edit') : t('writing.editor.preview')}
                 </Button>
               </div>
-              <Button
-                variant="rw-primary"
-                disabled={exporting}
-                onClick={() => void runExport([])}
-              >
-                <Download size={13} />
-                {exporting ? t('writing.toolbar.exporting') : t('writing.toolbar.export')}
-              </Button>
+              <div className="flex items-center gap-3">
+                {revisingDocId === activeDocId && (
+                  <span className="flex items-center gap-1.5 text-caption text-rw-accent">
+                    <RefreshCw size={12} className="animate-spin" />
+                    {t('writing.chat.revising')}
+                  </span>
+                )}
+                <Button
+                  variant="rw-primary"
+                  disabled={exporting}
+                  onClick={() => void runExport([])}
+                >
+                  <Download size={13} />
+                  {exporting ? t('writing.toolbar.exporting') : t('writing.toolbar.export')}
+                </Button>
+              </div>
             </div>
+
+            {/* 引用与快照 — compact collapsible drawer (replaces the
+                old right rail; the chat panel took that column). */}
+            <ContextDrawer
+              open={drawerOpen}
+              onToggle={() => setDrawerOpen((v) => !v)}
+              references={references}
+              snapshots={snapshots}
+              excludedRefIds={excludedRefIds}
+              onToggleRef={(refId, included) =>
+                setExcludedRefIds((prev) => {
+                  const next = new Set(prev);
+                  if (included) next.delete(refId);
+                  else next.add(refId);
+                  return next;
+                })}
+              onRestore={(sid) => void onRestoreSnapshot(sid)}
+            />
+
+            {/* revision banner — the last AI revision on this doc */}
+            {revision && (
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-rw-border bg-rw-accent-bg px-5 py-1.5">
+                <Sparkles size={13} className="shrink-0 text-rw-accent" />
+                <span className="text-[12px] font-medium text-rw-t1">
+                  {t('writing.revision.banner')}
+                </span>
+                {revision.warnings.length > 0 && (
+                  <span
+                    title={t('writing.polish.provenance', {
+                      numbers: revision.warnings.join(' · '),
+                    })}
+                    className="inline-flex items-center gap-1 rounded-full border
+                               border-rw-orange bg-rw-orange-bg px-2 py-0.5
+                               text-[11px] text-rw-orange"
+                  >
+                    <AlertTriangle size={11} />
+                    {t('writing.revision.warnChip')}
+                  </span>
+                )}
+                <div className="ml-auto flex items-center gap-1.5">
+                  <Button variant="rw-secondary" onClick={() => setDiffOpen(true)}>
+                    <Eye size={13} />
+                    {t('writing.revision.viewDiff')}
+                  </Button>
+                  {revision.snapshotId && (
+                    <Button
+                      variant="rw-secondary"
+                      onClick={() => void onUndoRevision(revision.snapshotId!)}
+                    >
+                      <RotateCcw size={13} />
+                      {t('writing.revision.undo')}
+                    </Button>
+                  )}
+                  <Button
+                    variant="rw-secondary"
+                    onClick={() => setRevisions((r) => {
+                      const next = { ...r };
+                      delete next[activeDocId];
+                      return next;
+                    })}
+                  >
+                    <Check size={13} />
+                    {t('writing.revision.keep')}
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* title + body */}
             <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-4">
@@ -724,17 +1040,27 @@ export function WritingStudio() {
                 value={draft.title}
                 onChange={(e) => setDraftTitle(e.target.value)}
                 placeholder={t('writing.editor.titlePlaceholder')}
+                disabled={chatStreaming}
+                title={chatStreaming ? t('writing.canvas.locked') : undefined}
                 className="w-full shrink-0 border-b border-rw-border bg-transparent pb-3
                            text-xl font-semibold text-rw-t1 outline-none
-                           placeholder:text-rw-t4"
+                           placeholder:text-rw-t4 disabled:opacity-60"
               />
               {previewMode ? (
                 <PreviewBody body={draft.body} references={references} />
               ) : (
-                <div className="relative min-h-[280px] w-full flex-1">
+                <div
+                  className={cn(
+                    'relative min-h-[280px] w-full flex-1',
+                    // Canvas lock — read-only + dim while a chat turn
+                    // streams (editor.setEditable is the hard lock).
+                    chatStreaming && 'pointer-events-none opacity-60',
+                  )}
+                  title={chatStreaming ? t('writing.canvas.locked') : undefined}
+                >
                   {/* TipTap ships no placeholder in starter-kit v3 —
                       a pointer-transparent overlay is enough here. */}
-                  {draft.body === '' && (
+                  {draft.body === '' && !starterVisible && (
                     <div
                       aria-hidden
                       className="pointer-events-none absolute left-0 top-4 font-mono
@@ -742,6 +1068,14 @@ export function WritingStudio() {
                     >
                       {t('writing.editor.bodyPlaceholder')}
                     </div>
+                  )}
+                  {/* empty doc + empty chat → starter templates that
+                      prefill the chat composer */}
+                  {starterVisible && (
+                    <StarterPanel
+                      onPick={(text) =>
+                        storeSetDraft(chatDraftKey(activeDocId), text)}
+                    />
                   )}
                   <RefChipProvider references={references}>
                     <EditorContent
@@ -760,7 +1094,7 @@ export function WritingStudio() {
               {/* polish toolbar — activates on non-empty selection */}
               {!previewMode && (
                 <PolishToolbar
-                  active={hasSelection}
+                  active={hasSelection && !chatStreaming}
                   refCount={includedRefIds.length}
                   customInstruction={customInstruction}
                   onCustomInstructionChange={setCustomInstruction}
@@ -819,24 +1153,50 @@ export function WritingStudio() {
         )}
       </main>
 
-      {/* right — references + snapshots */}
-      {activeDocId && draft !== undefined && (
-        <RightRail
-          references={references}
-          snapshots={snapshots}
-          excludedRefIds={excludedRefIds}
-          onToggleRef={(refId, included) =>
-            setExcludedRefIds((prev) => {
-              const next = new Set(prev);
-              if (included) next.delete(refId);
-              else next.add(refId);
-              return next;
-            })}
-          onRestore={(sid) => void onRestoreSnapshot(sid)}
-        />
-      )}
-
       {/* modals */}
+      {diffOpen && revision && (
+        <Modal
+          open
+          onClose={() => setDiffOpen(false)}
+          title={t('writing.revision.diffTitle')}
+          tone="rw"
+          width={680}
+        >
+          <div className="max-h-[380px] overflow-y-auto whitespace-pre-wrap
+                          rounded-md border border-rw-border bg-rw-bg-deep p-4
+                          text-[14px] leading-7">
+            <ReadOnlyDiff segments={revision.segments} />
+          </div>
+          {revision.warnings.length > 0 && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-rw-orange bg-rw-orange-bg px-3 py-2 text-caption text-rw-orange">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+              <span>
+                {t('writing.polish.provenance', {
+                  numbers: revision.warnings.join(' · '),
+                })}
+              </span>
+            </div>
+          )}
+          {/* The revision is ALREADY applied server-side, so per-hunk
+              accept/reject would fight the server state — the choices
+              collapse to keep (close) or undo (restore snapshot). */}
+          <div className="mt-4 flex justify-end gap-2 border-t border-rw-border-soft pt-3">
+            {revision.snapshotId && (
+              <Button
+                variant="rw-secondary"
+                onClick={() => void onUndoRevision(revision.snapshotId!)}
+              >
+                <RotateCcw size={13} />
+                {t('writing.revision.undo')}
+              </Button>
+            )}
+            <Button variant="rw-primary" onClick={() => setDiffOpen(false)}>
+              <Check size={13} />
+              {t('writing.revision.keep')}
+            </Button>
+          </div>
+        </Modal>
+      )}
       {picker && activeDocId && (
         <ReferencePickerModal
           docId={activeDocId}
@@ -889,19 +1249,49 @@ export function WritingStudio() {
    ════════════════════════════════════════════════════════════════════ */
 
 function DocsSidebar({
-  docs, activeDocId, onSelect, onNew, onDelete,
+  docs, activeDocId, collapsed, onToggleCollapsed, onSelect, onNew, onDelete,
 }: {
   docs: WritingDocMeta[];
   activeDocId: string | null;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
   onSelect: (id: string) => void;
   onNew: () => void;
   onDelete: (d: WritingDocMeta) => void;
 }) {
   const t = useT();
+  if (collapsed) {
+    return (
+      <aside className="flex h-full w-11 shrink-0 flex-col items-center border-r border-rw-border bg-rw-bg-deep pt-3">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title={t('writing.docs.expand')}
+          aria-label={t('writing.docs.expand')}
+          className="rounded-md p-1.5 text-rw-t3 transition-colors duration-80
+                     hover:bg-rw-surface hover:text-rw-t1"
+        >
+          <PanelLeftOpen size={15} />
+        </button>
+      </aside>
+    );
+  }
   return (
     <aside className="flex h-full w-[240px] shrink-0 flex-col border-r border-rw-border bg-rw-bg-deep">
-      <div className="px-4 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
-        {t('writing.docs.title')}
+      <div className="flex items-center justify-between px-4 pb-1 pt-4">
+        <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
+          {t('writing.docs.title')}
+        </span>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          title={t('writing.docs.collapse')}
+          aria-label={t('writing.docs.collapse')}
+          className="rounded-md p-1 text-rw-t4 transition-colors duration-80
+                     hover:bg-rw-surface hover:text-rw-t1"
+        >
+          <PanelLeftClose size={13} />
+        </button>
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto px-2 py-2">
         {docs.length === 0 && (
@@ -1225,12 +1615,16 @@ function PolishDiffCard({
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Right rail — 引用与来源 + 快照历史
+   Context drawer — 引用与快照. Compact collapsible strip at the top of
+   the document canvas (the old right rail's content; the 写作对话 chat
+   panel took over that column).
    ════════════════════════════════════════════════════════════════════ */
 
-function RightRail({
-  references, snapshots, excludedRefIds, onToggleRef, onRestore,
+function ContextDrawer({
+  open, onToggle, references, snapshots, excludedRefIds, onToggleRef, onRestore,
 }: {
+  open: boolean;
+  onToggle: () => void;
   references: WritingReference[];
   snapshots: WritingSnapshot[];
   excludedRefIds: Set<string>;
@@ -1239,93 +1633,322 @@ function RightRail({
 }) {
   const t = useT();
   return (
-    <aside className="flex h-full w-[292px] shrink-0 flex-col overflow-y-auto border-l border-rw-border bg-rw-bg-deep p-4">
-      <div className="pb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
-        {t('writing.refs.title', { count: references.length })}
-      </div>
-      {references.length === 0 && (
-        <div className="pb-2 text-caption text-rw-t3">
-          {t('writing.refs.empty')}
+    <div className="shrink-0 border-b border-rw-border bg-rw-bg-deep">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-1.5 px-5 py-1.5 text-left
+                   text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4
+                   transition-colors duration-80 hover:text-rw-t2"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <span>{t('writing.drawer.title')}</span>
+        <span className="normal-case tracking-normal text-rw-t4">
+          {t('writing.refs.title', { count: references.length })}
+          {' · '}
+          {t('writing.editor.snapshotCount', { count: snapshots.length })}
+        </span>
+      </button>
+      {open && (
+        <div className="grid max-h-[240px] grid-cols-2 gap-4 overflow-y-auto px-5 pb-3">
+          {/* references */}
+          <section className="min-w-0">
+            {references.length === 0 && (
+              <div className="py-1 text-caption text-rw-t3">
+                {t('writing.refs.empty')}
+              </div>
+            )}
+            <div className="space-y-2">
+              {references.map((r) => {
+                const included = !excludedRefIds.has(r.refId);
+                return (
+                  <div
+                    key={r.refId}
+                    className="rounded-md border border-rw-border bg-rw-surface p-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div
+                        className={cn(
+                          'min-w-0 truncate text-[13px]',
+                          r.refType === 'study' ? 'text-rw-green' : 'text-rw-accent',
+                        )}
+                        title={r.chipLabel}
+                      >
+                        ◇ {r.chipLabel}
+                      </div>
+                      <label
+                        className="flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-rw-t4"
+                        title={t('writing.refs.inPolish')}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={included}
+                          onChange={(e) => onToggleRef(r.refId, e.target.checked)}
+                          className="accent-[var(--rw-accent)]"
+                        />
+                        <Sparkles size={11} />
+                      </label>
+                    </div>
+                    <div className="mt-1 text-[11px] text-rw-t3">
+                      {t(GRANULARITY_LABEL_KEY[r.granularity] ?? 'writing.picker.gBasics')}
+                      {r.createdAt ? ` · ${fmtDateTime(r.createdAt)}` : ''}
+                    </div>
+                    {r.snapshotPreview && (
+                      <div className="mt-1 line-clamp-2 text-[11px] leading-4 text-rw-t4">
+                        {r.snapshotPreview}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          {/* snapshots */}
+          <section className="min-w-0">
+            <div className="pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
+              {t('writing.snapshots.title')}
+            </div>
+            {snapshots.length === 0 && (
+              <div className="text-caption text-rw-t3">{t('writing.snapshots.empty')}</div>
+            )}
+            <div className="space-y-1.5">
+              {snapshots.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-rw-border bg-rw-surface px-2.5 py-1.5"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-[12px] text-rw-t2">{s.label || s.id}</div>
+                    <div className="text-[11px] text-rw-t4">{fmtDateTime(s.createdAt)}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRestore(s.id)}
+                    title={t('writing.snapshots.restore')}
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-rw-border
+                               px-2 py-1 text-[11px] text-rw-t3 transition-colors duration-80
+                               hover:border-rw-accent-bd hover:text-rw-t1"
+                  >
+                    <RotateCcw size={11} />
+                    {t('writing.snapshots.restore')}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       )}
-      <div className="space-y-2">
-        {references.map((r) => {
-          const included = !excludedRefIds.has(r.refId);
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   写作对话 — the co-writing chat panel (middle column)
+   ════════════════════════════════════════════════════════════════════ */
+
+function WritingChatPanel({
+  docId, streaming, onSend, onAtTyped, onUndoRevision,
+}: {
+  docId: string;
+  streaming: boolean;
+  onSend: (text: string) => void;
+  /** '@' typed into the composer → open the reference picker. */
+  onAtTyped: () => void;
+  onUndoRevision: (snapshotId: string) => void;
+}) {
+  const t = useT();
+  const msgs = useAppState((s) => s.writingChatByDoc[docId]);
+  const error = useAppState((s) => s.writingChatErrorByDoc[docId] ?? null);
+  const setWritingChatError = useAppState((s) => s.setWritingChatError);
+  const snapshotByMsg = useAppState((s) => s.writingChatSnapshotByMsg);
+  const draftText = useAppState((s) => s.drafts[chatDraftKey(docId)] ?? '');
+  const setDraft = useAppState((s) => s.setDraft);
+
+  // History hydrate — once per doc (undefined = never loaded; a live
+  // send marks the transcript loaded first, so we never clobber it).
+  const loaded = msgs !== undefined;
+  useEffect(() => {
+    if (loaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api.getWritingChat(docId);
+        if (cancelled) return;
+        const st = useAppState.getState();
+        if (st.writingChatByDoc[docId] !== undefined) return;
+        st.setWritingChatMsgs(docId, list.map((m): WritingChatMsg => ({
+          id: m.id, role: m.role, text: m.text,
+          docApplied: m.docApplied, createdAt: m.createdAt,
+        })));
+      } catch (e) {
+        if (!cancelled) {
+          useAppState.getState().showToast(
+            t('writing.chat.loadFailed', { error: errMsg(e) }), 'error');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docId, loaded]);
+
+  // Keep the transcript pinned to the bottom as messages stream in.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [msgs]);
+
+  const list = msgs ?? [];
+
+  return (
+    <aside className="flex h-full w-[420px] shrink-0 flex-col border-r border-rw-border bg-rw-bg-deep">
+      <div className="shrink-0 px-4 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
+        {t('writing.chat.title')}
+      </div>
+      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+        {loaded && list.length === 0 && (
+          <div className="py-2 text-caption text-rw-t3">
+            {t('writing.chat.empty')}
+          </div>
+        )}
+        {list.map((m, i) => {
+          const isLast = i === list.length - 1;
+          const snapId = m.role === 'assistant' ? snapshotByMsg[m.id] : undefined;
           return (
-            <div
-              key={r.refId}
-              className="rounded-md border border-rw-border bg-rw-surface p-3"
+            <MessageRow
+              key={m.id}
+              role={m.role === 'user' ? 'user' : 'agent'}
+              text={m.text}
+              ts={m.createdAt ? fmtDateTime(m.createdAt) : undefined}
+              tone="base"
+              streaming={streaming && isLast && m.role === 'assistant'}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div
-                  className={cn(
-                    'min-w-0 truncate text-[13px]',
-                    r.refType === 'study' ? 'text-rw-green' : 'text-rw-accent',
+              {m.role === 'assistant' && m.docApplied && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-rw-green bg-rw-green-bg px-2 py-0.5 text-[11px] text-rw-green">
+                    <Check size={11} />
+                    {t('writing.chat.docApplied')}
+                  </span>
+                  {/* GET /chat doesn't return snapshot ids — undo only
+                      renders for turns captured live this launch. */}
+                  {snapId && (
+                    <button
+                      type="button"
+                      onClick={() => onUndoRevision(snapId)}
+                      className="inline-flex items-center gap-1 rounded-full border border-rw-border
+                                 px-2 py-0.5 text-[11px] text-rw-t3 transition-colors duration-80
+                                 hover:border-rw-accent-bd hover:text-rw-t1"
+                    >
+                      <RotateCcw size={11} />
+                      {t('writing.chat.undoRevision')}
+                    </button>
                   )}
-                  title={r.chipLabel}
-                >
-                  ◇ {r.chipLabel}
-                </div>
-                <label
-                  className="flex shrink-0 cursor-pointer items-center gap-1 text-[11px] text-rw-t4"
-                  title={t('writing.refs.inPolish')}
-                >
-                  <input
-                    type="checkbox"
-                    checked={included}
-                    onChange={(e) => onToggleRef(r.refId, e.target.checked)}
-                    className="accent-[var(--rw-accent)]"
-                  />
-                  <Sparkles size={11} />
-                </label>
-              </div>
-              <div className="mt-1 text-[11px] text-rw-t3">
-                {t(GRANULARITY_LABEL_KEY[r.granularity] ?? 'writing.picker.gBasics')}
-                {r.createdAt ? ` · ${fmtDateTime(r.createdAt)}` : ''}
-              </div>
-              {r.snapshotPreview && (
-                <div className="mt-1.5 line-clamp-3 text-[11px] leading-4 text-rw-t4">
-                  {r.snapshotPreview}
                 </div>
               )}
-            </div>
+            </MessageRow>
           );
         })}
       </div>
+      <div className="shrink-0 border-t border-rw-border px-3 py-3">
+        <ChatComposer
+          value={draftText}
+          onChange={(text) => {
+            // '@' typed (composer grew by exactly that char) → open
+            // the reference picker in chat-mention mode.
+            if (text.length === draftText.length + 1 && text.endsWith('@')) {
+              onAtTyped();
+            }
+            setDraft(chatDraftKey(docId), text);
+          }}
+          onSend={() => {
+            const v = draftText.trim();
+            if (v && !streaming) onSend(v);
+          }}
+          disabled={streaming}
+          sendDisabled={!draftText.trim()}
+          tone="base"
+          placeholder={t('writing.chat.placeholder')}
+          error={error}
+          onDismissError={() => setWritingChatError(docId, null)}
+        />
+      </div>
+    </aside>
+  );
+}
 
-      <div className="mt-5 border-t border-rw-border pt-4">
-        <div className="pb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
-          {t('writing.snapshots.title')}
+/* ════════════════════════════════════════════════════════════════════
+   Read-only word diff — the revision modal body. Same visual language
+   as PolishDiffCard's segments, minus the per-hunk ✓/✗ (the revision
+   is already applied server-side; choices collapse to 保留/撤销).
+   ════════════════════════════════════════════════════════════════════ */
+
+function ReadOnlyDiff({ segments }: { segments: DiffSegment[] }) {
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.kind === 'same') {
+          return <span key={i} className="text-rw-t2">{seg.text}</span>;
+        }
+        return (
+          <span key={i} className="mx-0.5">
+            {seg.del && (
+              <span className="rounded-sm bg-rw-red-bg px-0.5 text-rw-red line-through">
+                {seg.del}
+              </span>
+            )}
+            {seg.add && (
+              <span className="rounded-sm bg-rw-green-bg px-0.5 text-rw-green">
+                {seg.add}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Starter panel — empty doc + empty chat. Template prompts that
+   prefill the chat composer.
+   ════════════════════════════════════════════════════════════════════ */
+
+const STARTER_TEMPLATE_KEYS: Array<keyof Dict> = [
+  'writing.starter.t1',
+  'writing.starter.t2',
+  'writing.starter.t3',
+];
+
+function StarterPanel({ onPick }: { onPick: (text: string) => void }) {
+  const t = useT();
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center">
+      <div className="w-full max-w-[420px] rounded-md border border-rw-border bg-rw-bg-deep p-5 text-center shadow-lg">
+        <Sparkles size={18} className="mx-auto text-rw-accent" />
+        <div className="mt-2 text-[14px] font-semibold text-rw-t1">
+          {t('writing.starter.title')}
         </div>
-        {snapshots.length === 0 && (
-          <div className="text-caption text-rw-t3">{t('writing.snapshots.empty')}</div>
-        )}
-        <div className="space-y-1.5">
-          {snapshots.map((s) => (
-            <div
-              key={s.id}
-              className="flex items-center justify-between gap-2 rounded-md border border-rw-border bg-rw-surface px-3 py-2"
+        <div className="mt-1 text-caption text-rw-t3">
+          {t('writing.chat.empty')}
+        </div>
+        <div className="mt-4 space-y-2">
+          {STARTER_TEMPLATE_KEYS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => onPick(t(k))}
+              className="block w-full rounded-md border border-rw-border bg-rw-surface
+                         px-3 py-2 text-left text-[13px] text-rw-t2 transition-colors
+                         duration-80 hover:border-rw-accent-bd hover:text-rw-t1"
             >
-              <div className="min-w-0">
-                <div className="truncate text-[12px] text-rw-t2">{s.label || s.id}</div>
-                <div className="text-[11px] text-rw-t4">{fmtDateTime(s.createdAt)}</div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onRestore(s.id)}
-                title={t('writing.snapshots.restore')}
-                className="flex shrink-0 items-center gap-1 rounded-md border border-rw-border
-                           px-2 py-1 text-[11px] text-rw-t3 transition-colors duration-80
-                           hover:border-rw-accent-bd hover:text-rw-t1"
-              >
-                <RotateCcw size={11} />
-                {t('writing.snapshots.restore')}
-              </button>
-            </div>
+              {t(k)}
+            </button>
           ))}
         </div>
       </div>
-    </aside>
+    </div>
   );
 }
 

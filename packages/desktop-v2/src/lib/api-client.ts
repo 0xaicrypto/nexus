@@ -2202,7 +2202,8 @@ class _ApiClient {
     );
   }
 
-  /** GET /docs/{id}/snapshots — version history for the right rail. */
+  /** GET /docs/{id}/snapshots — version history for the 引用与快照
+   *  drawer. */
   async listWritingSnapshots(id: string): Promise<WritingSnapshot[]> {
     interface RawSnap { id: string; label: string; created_at: string }
     const r = await this.fetch<{ snapshots: RawSnap[] }>(
@@ -2353,6 +2354,83 @@ class _ApiClient {
       throw new ApiError(r.status, await r.text().catch(() => r.statusText), path);
     }
     return r.blob();
+  }
+
+  /** GET /docs/{id}/chat — chronological co-writing transcript. */
+  async getWritingChat(id: string): Promise<WritingChatMessage[]> {
+    interface RawMsg {
+      id: string; role: string; text: string;
+      doc_applied: number; created_at: string;
+    }
+    const r = await this.fetch<{ messages: RawMsg[] }>(
+      `/api/v1/docs/${encodeURIComponent(id)}/chat`,
+    );
+    return (r.messages ?? []).map((m) => ({
+      id:         m.id,
+      role:       m.role === 'assistant' ? 'assistant' : 'user',
+      text:       m.text,
+      docApplied: !!m.doc_applied,
+      createdAt:  m.created_at,
+    }));
+  }
+
+  /**
+   * POST /docs/{id}/chat — one co-writing turn. Streams SSE frames
+   * (``data: {...}\n\n`` — same parser as ``polishWritingDoc``):
+   * reply_chunk* → [doc_started → doc_chunk*] → [provenance_warning]
+   * → done — or a terminal error frame (HTTP stays 200; the user
+   * message is persisted server-side either way). A non-null
+   * ``doc_body`` on done means the server ALREADY applied it to the
+   * doc and snapshotted the previous body (``snapshot_id`` = that
+   * pre-revision snapshot — restoring it undoes the revision).
+   */
+  async *chatWritingDoc(
+    id: string,
+    input: { message: string; refIds?: string[] },
+    abortSignal?: AbortSignal,
+  ): AsyncIterable<WritingChatFrame> {
+    const path = `/api/v1/docs/${encodeURIComponent(id)}/chat`;
+    const r = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        message: input.message,
+        ...(input.refIds !== undefined ? { ref_ids: input.refIds } : {}),
+      }),
+      signal: abortSignal,
+    });
+    if (!r.ok || !r.body) {
+      throw new ApiError(r.status, await r.text().catch(() => r.statusText), path);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', () => {
+        try { reader.cancel(); } catch { /* already cancelled */ }
+      }, { once: true });
+    }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                yield JSON.parse(line.slice(6)) as WritingChatFrame;
+              } catch { /* malformed payload; skip */ }
+            }
+          }
+        }
+      }
+    } finally {
+      try { reader.releaseLock(); } catch { /* ok */ }
+    }
   }
 
   // ───────────────────────────────────────────────────────────────
@@ -3203,6 +3281,34 @@ export interface WritingPhiResolution {
   action: 'replace' | 'ignore';
   replacement?: string;
 }
+
+/** One message from GET /docs/{id}/chat (co-writing transcript). */
+export interface WritingChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** True when this assistant turn rewrote the document. */
+  docApplied: boolean;
+  createdAt: string;
+}
+
+/** SSE frames streamed by POST /docs/{id}/chat. ``snapshot_id`` on
+ *  done is the PRE-revision snapshot (restore = undo the revision);
+ *  the server emits it as an integer row id. */
+export type WritingChatFrame =
+  | { type: 'reply_chunk'; text: string }
+  | { type: 'doc_started' }
+  | { type: 'doc_chunk'; text: string }
+  | { type: 'provenance_warning'; numbers: string[] }
+  | {
+      type: 'done';
+      reply: string;
+      doc_body: string | null;
+      snapshot_id: number | string | null;
+      message_id: string;
+      model: string;
+    }
+  | { type: 'error'; message: string };
 
 // ─────────────────────────────────────────────────────────────────────
 // Skills / plugins types — wire shapes for /api/v1/skills*.

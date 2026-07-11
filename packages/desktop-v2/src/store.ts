@@ -264,6 +264,44 @@ interface AppState {
   // Encounter pane is unmounted is still visible on remount.
   chatErrorBySession: Record<string, string | null>;
   setChatError: (sessionId: string, error: string | null) => void;
+
+  // Writing Studio co-writing chat (P3) ──────────────
+  // Per-doc chat transcript + stream state, mirroring the
+  // chatMsgsBySession pattern: the SSE consumer keeps writing into
+  // the store, so switching docs / workspaces mid-stream survives
+  // and the panel rehydrates on remount. Keyed by doc id. Wiped on
+  // logout / identity switch like chatMsgsBySession.
+  writingChatByDoc: Record<string, WritingChatMsg[]>;
+  writingChatStreamingByDoc: Record<string, boolean>;
+  /** snapshot_id per assistant message_id, captured live from the
+   *  done SSE frame. GET /docs/{id}/chat does NOT return snapshot
+   *  ids, so undo buttons only render for messages whose id is in
+   *  this map (history from before this launch has no undo). */
+  writingChatSnapshotByMsg: Record<string, string>;
+  writingChatErrorByDoc: Record<string, string | null>;
+  setWritingChatMsgs: (docId: string, msgs: WritingChatMsg[]) => void;
+  appendWritingChatMsg: (docId: string, msg: WritingChatMsg) => void;
+  /** Mutate the last message in a doc's transcript — same two forms
+   *  as updateLastChatMsg (partial or functional updater). */
+  updateLastWritingChatMsg: (
+    docId: string,
+    mut: Partial<WritingChatMsg> | ((last: WritingChatMsg) => Partial<WritingChatMsg>),
+  ) => void;
+  setWritingChatStreaming: (docId: string, streaming: boolean) => void;
+  setWritingChatSnapshot: (messageId: string, snapshotId: string) => void;
+  setWritingChatError: (docId: string, error: string | null) => void;
+}
+
+/** One turn in a Writing Studio co-writing transcript (store shape —
+ *  hydrated from GET /docs/{id}/chat and appended to live during SSE
+ *  streaming). */
+export interface WritingChatMsg {
+  id: string;
+  role: 'user' | 'assistant';
+  text: string;
+  /** True when this assistant turn rewrote the document. */
+  docApplied: boolean;
+  createdAt?: string;
 }
 
 const TOKEN_KEY   = 'nexus.auth.token';
@@ -483,6 +521,10 @@ export const useAppState = create<AppState>((set, get) => ({
       // Writing Studio — docs belong to the outgoing identity.
       activeWritingDocId: null,
       writingDrafts:      {},
+      writingChatByDoc:          {},
+      writingChatStreamingByDoc: {},
+      writingChatSnapshotByMsg:  {},
+      writingChatErrorByDoc:     {},
       // F-skills — installed skills are per-user; drop the cache so
       // the incoming identity's list is fetched fresh.
       skills:            [],
@@ -525,6 +567,10 @@ export const useAppState = create<AppState>((set, get) => ({
       // Writing Studio — see resetForIdentitySwitch.
       activeWritingDocId: null,
       writingDrafts:      {},
+      writingChatByDoc:          {},
+      writingChatStreamingByDoc: {},
+      writingChatSnapshotByMsg:  {},
+      writingChatErrorByDoc:     {},
       // F-skills — see resetForIdentitySwitch.
       skills:            [],
       skillsLoaded:      false,
@@ -872,6 +918,52 @@ export const useAppState = create<AppState>((set, get) => ({
   setChatError: (sessionId, error) =>
     set((s) => ({
       chatErrorBySession: { ...s.chatErrorBySession, [sessionId]: error },
+    })),
+
+  // Writing Studio co-writing chat (P3) — see interface block.
+  writingChatByDoc:          {},
+  writingChatStreamingByDoc: {},
+  writingChatSnapshotByMsg:  {},
+  writingChatErrorByDoc:     {},
+  setWritingChatMsgs: (docId, msgs) =>
+    set((s) => ({
+      writingChatByDoc: { ...s.writingChatByDoc, [docId]: msgs },
+    })),
+  appendWritingChatMsg: (docId, msg) =>
+    set((s) => {
+      const cur = s.writingChatByDoc[docId] ?? [];
+      return {
+        writingChatByDoc: { ...s.writingChatByDoc, [docId]: [...cur, msg] },
+      };
+    }),
+  updateLastWritingChatMsg: (docId, mut) =>
+    set((s) => {
+      const cur = s.writingChatByDoc[docId];
+      if (!cur || cur.length === 0) return {};
+      const last = cur[cur.length - 1];
+      const patch = typeof mut === 'function' ? mut(last) : mut;
+      const next = [...cur.slice(0, -1), { ...last, ...patch }];
+      return {
+        writingChatByDoc: { ...s.writingChatByDoc, [docId]: next },
+      };
+    }),
+  setWritingChatStreaming: (docId, streaming) =>
+    set((s) => ({
+      writingChatStreamingByDoc: {
+        ...s.writingChatStreamingByDoc,
+        [docId]: streaming,
+      },
+    })),
+  setWritingChatSnapshot: (messageId, snapshotId) =>
+    set((s) => ({
+      writingChatSnapshotByMsg: {
+        ...s.writingChatSnapshotByMsg,
+        [messageId]: snapshotId,
+      },
+    })),
+  setWritingChatError: (docId, error) =>
+    set((s) => ({
+      writingChatErrorByDoc: { ...s.writingChatErrorByDoc, [docId]: error },
     })),
 }));
 

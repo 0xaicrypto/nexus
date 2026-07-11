@@ -845,4 +845,29 @@ export const zh: Dict = {
 
   // Writing Studio — TipTap 编辑器（P2）。新键统一追加在字典末尾。
   'writing.chip.deidentified':     '已脱敏',
+
+  // Writing Studio — 对话式共写（P3）：写作对话面板 + 文档画布。
+  // 新键统一追加在字典末尾。
+  'writing.chat.title':          '写作对话',
+  'writing.chat.empty':          '与 AI 对话，共同起草和修改这篇文档 — 它可以直接改写右侧画布。',
+  'writing.chat.placeholder':    '描述要写或要改的内容。输入 @ 引用患者 / 研究…',
+  'writing.chat.loadFailed':     '对话加载失败：{error}',
+  'writing.chat.failed':         '对话失败：{error}',
+  'writing.chat.docApplied':     '已更新文档',
+  'writing.chat.undoRevision':   '撤销此修订',
+  'writing.chat.revising':       '正在改写文档…',
+  'writing.revision.banner':     'AI 已修订文档',
+  'writing.revision.viewDiff':   '查看差异',
+  'writing.revision.undo':       '撤销',
+  'writing.revision.keep':       '保留',
+  'writing.revision.diffTitle':  '本次修订差异',
+  'writing.revision.warnChip':   '数值待核',
+  'writing.canvas.locked':       '对话修订中 — 画布暂时锁定',
+  'writing.drawer.title':        '引用与快照',
+  'writing.starter.title':       '从对话开始写作',
+  'writing.starter.t1':          '写一份病例报告初稿（引用患者…）',
+  'writing.starter.t2':          '起草研究中期摘要',
+  'writing.starter.t3':          '把要点扩写成段落',
+  'writing.docs.collapse':       '收起文档栏',
+  'writing.docs.expand':         '展开文档栏',
 };

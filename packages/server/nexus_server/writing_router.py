@@ -18,6 +18,9 @@ medic can never touch another's documents):
   POST   /docs/{id}/snapshots/{sid}/restore restore a snapshot
   POST   /docs/{id}/references              insert a de-identified data chip
   POST   /docs/{id}/polish                  SSE selection rewrite
+  GET    /docs/{id}/chat                    co-writing chat history
+  POST   /docs/{id}/chat                    SSE co-writing turn (may
+                                            regenerate the doc body)
   POST   /docs/{id}/phi-scan                regex + roster-name PHI findings
   POST   /docs/{id}/export                  expand chips → .docx (PHI gate)
 
@@ -123,6 +126,19 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS doc_chat_messages (
+            id          TEXT PRIMARY KEY,
+            doc_id      TEXT NOT NULL,
+            user_id     TEXT NOT NULL,
+            role        TEXT NOT NULL,
+            text        TEXT NOT NULL DEFAULT '',
+            doc_applied INTEGER NOT NULL DEFAULT 0,
+            created_at  TIMESTAMP NOT NULL
+        )
+        """
+    )
 
 
 def _now() -> str:
@@ -173,6 +189,13 @@ class ReferenceCreateRequest(BaseModel):
 class PolishRequest(BaseModel):
     selection: str = Field(..., min_length=1)
     instruction: str = ""
+    ref_ids: list[str] = []
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    # Optional subset of doc reference ids to inject as context; when
+    # empty/omitted ALL of the doc's reference snapshots are injected.
     ref_ids: list[str] = []
 
 
@@ -781,6 +804,10 @@ async def delete_doc(
             (current_user, doc_id),
         )
         conn.execute(
+            "DELETE FROM doc_chat_messages WHERE user_id = ? AND doc_id = ?",
+            (current_user, doc_id),
+        )
+        conn.execute(
             "DELETE FROM docs WHERE user_id = ? AND id = ?",
             (current_user, doc_id),
         )
@@ -1038,6 +1065,396 @@ async def polish_selection(
             })
         except Exception as exc:  # noqa: BLE001
             logger.warning("polish stream failed: %s", exc)
+            yield _sse({"type": "error", "message": str(exc)[:500]})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Conversational co-writing (chat, SSE)
+# ─────────────────────────────────────────────────────────────────────
+#
+# Product pivot: the primary writing interaction is a chat with the AI
+# which GENERATES and REVISES the document; the human reviews and
+# directs. The model answers conversationally and — only when the turn
+# requires a document change — additionally emits the complete updated
+# body wrapped in <doc>...</doc>. The server splits the stream into
+# reply frames vs doc frames, applies the doc (snapshot-first), and
+# persists the transcript in doc_chat_messages.
+
+_CHAT_HISTORY_WINDOW = 12
+_CHAT_LLM_CHUNK = 64
+
+_DOC_OPEN = "<doc>"
+_DOC_CLOSE = "</doc>"
+
+_CHAT_PERSONA = (
+    "你是一名严谨的临床写作副驾驶，与医生用户通过对话协作撰写病例报告、"
+    "研究摘要与伦理材料。文档正文由你生成和修改；用户负责审阅并提出要求。"
+    "保持医学术语准确、语气专业。"
+)
+
+_CHAT_OUTPUT_CONTRACT = (
+    "输出规则（必须严格遵守）：\n"
+    "1. 始终先输出一段简短的对话回复，面向作者，说明修改思路或回答问题。\n"
+    "2. 仅当用户的请求需要修改文档正文时，才在对话回复之后额外输出更新后的"
+    "文档正文，并且必须用 <doc> 和 </doc> 标签精确包裹。<doc> 块内必须是"
+    "完整的全文正文，绝不能只输出片段、差异或省略号。\n"
+    "3. 正文中形如 {{ref:ID}} 的引用占位符必须原样逐字保留，"
+    "不得改写、编造或删除。\n"
+    "4. 如果用户只是提问、讨论或请求不涉及正文改动，只输出对话回复，"
+    "不要输出 <doc> 块。\n"
+    "5. 仅基于当前正文与提供的引用数据写作，不得编造数值。"
+)
+
+
+def _partial_tag_suffix_len(buf: str, tag: str) -> int:
+    """Length of the longest strict-prefix of ``tag`` that ``buf`` ends
+    with — i.e. how many trailing chars might be the start of a tag
+    split across stream chunks and must be held back."""
+    for k in range(min(len(buf), len(tag) - 1), 0, -1):
+        if buf.endswith(tag[:k]):
+            return k
+    return 0
+
+
+class _DocTagParser:
+    """Incremental splitter of an LLM stream into conversational reply
+    text vs <doc>...</doc> body text.
+
+    ``feed`` returns a list of (kind, text) events with kind in
+    {'reply', 'doc_started', 'doc'}. Tags split across chunk boundaries
+    are handled by holding back any buffer suffix that could still turn
+    out to be the start of the tag we're looking for."""
+
+    def __init__(self) -> None:
+        self._buf = ""
+        self.in_doc = False
+        self.doc_seen = False
+
+    def feed(self, chunk: str) -> list[tuple[str, str]]:
+        self._buf += chunk
+        out: list[tuple[str, str]] = []
+        while True:
+            tag = _DOC_CLOSE if self.in_doc else _DOC_OPEN
+            idx = self._buf.find(tag)
+            if idx != -1:
+                if idx > 0:
+                    out.append(
+                        ("doc" if self.in_doc else "reply", self._buf[:idx])
+                    )
+                self._buf = self._buf[idx + len(tag):]
+                if self.in_doc:
+                    self.in_doc = False
+                else:
+                    self.in_doc = True
+                    self.doc_seen = True
+                    out.append(("doc_started", ""))
+                continue
+            hold = _partial_tag_suffix_len(self._buf, tag)
+            emit_len = len(self._buf) - hold
+            if emit_len > 0:
+                out.append(
+                    ("doc" if self.in_doc else "reply",
+                     self._buf[:emit_len])
+                )
+                self._buf = self._buf[emit_len:]
+            return out
+
+    def finish(self) -> list[tuple[str, str]]:
+        """Flush whatever is left (held-back partial tag / unterminated
+        doc block — an unterminated <doc> still counts as doc text)."""
+        if not self._buf:
+            return []
+        out = [("doc" if self.in_doc else "reply", self._buf)]
+        self._buf = ""
+        return out
+
+
+def _strip_unknown_ref_tokens(
+    body: str, valid_ids: set[str],
+) -> tuple[str, list[str]]:
+    """Defensive guard: drop any {{ref:ID}} token whose ID is not one of
+    this doc's references (the model must never invent chips). Returns
+    (cleaned_body, removed_ids)."""
+    removed: list[str] = []
+
+    def _sub(m: re.Match) -> str:
+        rid = m.group(1)
+        if rid in valid_ids or rid.lower() in valid_ids:
+            return m.group(0)
+        removed.append(rid)
+        return ""
+
+    return _REF_PLACEHOLDER_RE.sub(_sub, body), removed
+
+
+@router.get("/docs/{doc_id}/chat")
+async def get_doc_chat(
+    doc_id: str,
+    current_user: str = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Chronological co-writing transcript for this doc."""
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_schema(conn)
+        _get_doc_or_404(conn, current_user, doc_id)
+        rows = conn.execute(
+            "SELECT id, role, text, doc_applied, created_at "
+            "FROM doc_chat_messages WHERE user_id = ? AND doc_id = ? "
+            "ORDER BY created_at ASC, rowid ASC",
+            (current_user, doc_id),
+        ).fetchall()
+        return {
+            "messages": [
+                {
+                    "id": r["id"], "role": r["role"], "text": r["text"],
+                    "doc_applied": int(r["doc_applied"] or 0),
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ]
+        }
+
+
+@router.post("/docs/{doc_id}/chat")
+async def doc_chat(
+    doc_id: str,
+    req: ChatRequest,
+    current_user: str = Depends(get_current_user),
+):
+    """One co-writing turn. Streams SSE frames:
+
+        {type:'reply_chunk', text}            — conversational reply
+        {type:'doc_started'}                  — <doc> block opened
+        {type:'doc_chunk', text}              — doc body text
+        {type:'provenance_warning', numbers}  — numbers in the new body
+                                                with no source in the
+                                                previous body / refs /
+                                                user message
+        {type:'done', reply, doc_body|null,
+                      snapshot_id|null}       — turn complete
+        {type:'error', message}               — LLM failure (the user
+                                                message is still saved)
+
+    When the model emits a <doc> block the PREVIOUS body is snapshotted
+    first (label '对话修订前'), then the doc is updated PUT-style and the
+    assistant message is stored with doc_applied=1.
+    """
+    # Resolve all context BEFORE starting the stream so a bad doc_id is
+    # a clean 404, not an SSE error frame.
+    with get_db_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        _ensure_schema(conn)
+        row = _get_doc_or_404(conn, current_user, doc_id)
+        title = str(row["title"] or "")
+        prev_body = str(row["body"] or "")
+
+        ref_rows = conn.execute(
+            "SELECT id, snapshot FROM doc_references "
+            "WHERE user_id = ? AND doc_id = ? ORDER BY created_at ASC",
+            (current_user, doc_id),
+        ).fetchall()
+        valid_ref_ids = {str(r["id"]) for r in ref_rows}
+        if req.ref_ids:
+            wanted = set(req.ref_ids)
+            snapshots = [
+                str(r["snapshot"] or "") for r in ref_rows
+                if str(r["id"]) in wanted
+            ]
+        else:
+            snapshots = [str(r["snapshot"] or "") for r in ref_rows]
+
+        # Last N turns, chronological, EXCLUDING the message being sent
+        # now (it's appended below as the live user turn).
+        hist_rows = conn.execute(
+            "SELECT role, text FROM doc_chat_messages "
+            "WHERE user_id = ? AND doc_id = ? "
+            "ORDER BY created_at DESC, rowid DESC LIMIT ?",
+            (current_user, doc_id, _CHAT_HISTORY_WINDOW),
+        ).fetchall()
+        history = [
+            {"role": str(r["role"]), "content": str(r["text"] or "")}
+            for r in reversed(hist_rows)
+        ]
+
+        # Persist the user message immediately — it must survive even
+        # if the LLM call fails.
+        user_msg_id = str(uuid.uuid4())
+        conn.execute(
+            "INSERT INTO doc_chat_messages "
+            "(id, doc_id, user_id, role, text, doc_applied, created_at) "
+            "VALUES (?, ?, ?, 'user', ?, 0, ?)",
+            (user_msg_id, doc_id, current_user, req.message, _now()),
+        )
+        conn.commit()
+
+    system_prompt = (
+        _CHAT_PERSONA + "\n\n" + _CHAT_OUTPUT_CONTRACT
+        + f"\n\n文档标题：{title or '（未命名）'}"
+        + "\n当前文档正文（{{ref:ID}} 为引用占位符，必须原样保留）：\n"
+        + (prev_body if prev_body else "（正文为空）")
+    )
+    if snapshots:
+        system_prompt += (
+            "\n\n以下是本文档的引用数据（已脱敏），写作时只能使用这些"
+            "数据中的数值：\n" + "\n---\n".join(snapshots)
+        )
+
+    messages = history + [{"role": "user", "content": req.message}]
+
+    async def event_stream() -> AsyncIterator[str]:
+        try:
+            # Same dispatch helper as polish — late import + module
+            # attribute call so tests can monkeypatch
+            # llm_gateway.call_llm; provider routing (kimi/openai/
+            # anthropic/gemini) happens inside call_llm.
+            from nexus_server import llm_gateway
+            content, model_used, _stop, _tools = await llm_gateway.call_llm(
+                messages,
+                system_prompt,
+                None,      # model → DEFAULT_LLM_MODEL via provider dispatch
+                0.3,
+                8192,
+            )
+            content = (content or "").strip()
+            if not content:
+                yield _sse({
+                    "type": "error",
+                    "message": "LLM returned empty response",
+                })
+                return
+
+            # Incremental parse: feed the model output through the tag
+            # splitter in chunks (tags may straddle chunk boundaries).
+            parser = _DocTagParser()
+            reply_parts: list[str] = []
+            doc_parts: list[str] = []
+
+            def _frames(events: list[tuple[str, str]]) -> list[str]:
+                out: list[str] = []
+                for kind, text in events:
+                    if kind == "reply":
+                        reply_parts.append(text)
+                        out.append(_sse({
+                            "type": "reply_chunk", "text": text,
+                        }))
+                    elif kind == "doc_started":
+                        out.append(_sse({"type": "doc_started"}))
+                    else:  # 'doc'
+                        doc_parts.append(text)
+                        out.append(_sse({
+                            "type": "doc_chunk", "text": text,
+                        }))
+                return out
+
+            for i in range(0, len(content), _CHAT_LLM_CHUNK):
+                for frame in _frames(
+                    parser.feed(content[i:i + _CHAT_LLM_CHUNK])
+                ):
+                    yield frame
+            for frame in _frames(parser.finish()):
+                yield frame
+
+            reply = "".join(reply_parts).strip()
+            doc_body: Optional[str] = (
+                "".join(doc_parts).strip() if parser.doc_seen else None
+            )
+
+            snapshot_id: Optional[int] = None
+            now = _now()
+            assistant_msg_id = str(uuid.uuid4())
+
+            if doc_body is not None:
+                # Defensive: the model must not invent reference chips.
+                doc_body, removed = _strip_unknown_ref_tokens(
+                    doc_body, valid_ref_ids,
+                )
+                if removed:
+                    logger.warning(
+                        "doc chat: stripped %d unknown ref token(s): %s",
+                        len(removed), removed,
+                    )
+
+                # Hallucinated-value guard: numbers in the new body
+                # that appear nowhere in the previous body, the ref
+                # snapshots injected as context, or the user message.
+                allowed = _extract_numbers(prev_body)
+                allowed |= _extract_numbers(req.message)
+                for s in snapshots:
+                    allowed |= _extract_numbers(s)
+                suspicious: list[str] = []
+                for m in _NUM_RE.finditer(doc_body):
+                    token = m.group(0)
+                    if (token.rstrip("%") not in allowed
+                            and token not in suspicious):
+                        suspicious.append(token)
+                if suspicious:
+                    yield _sse({
+                        "type": "provenance_warning",
+                        "numbers": suspicious,
+                    })
+
+                with get_db_connection() as conn:
+                    conn.row_factory = sqlite3.Row
+                    _ensure_schema(conn)
+                    # Snapshot the PREVIOUS body first so the author
+                    # can always revert the AI revision.
+                    cur = conn.execute(
+                        "INSERT INTO doc_snapshots "
+                        "(doc_id, user_id, body, label, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (doc_id, current_user, prev_body,
+                         "对话修订前", now),
+                    )
+                    snapshot_id = cur.lastrowid
+                    conn.execute(
+                        "DELETE FROM doc_snapshots "
+                        "WHERE user_id = ? AND doc_id = ? AND id NOT IN ("
+                        "  SELECT id FROM doc_snapshots "
+                        "  WHERE user_id = ? AND doc_id = ? "
+                        "  ORDER BY id DESC LIMIT ?)",
+                        (current_user, doc_id, current_user, doc_id,
+                         _SNAPSHOT_CAP),
+                    )
+                    # PUT-equivalent update of the doc body.
+                    conn.execute(
+                        "UPDATE docs SET body = ?, updated_at = ? "
+                        "WHERE user_id = ? AND id = ?",
+                        (doc_body, now, current_user, doc_id),
+                    )
+                    conn.execute(
+                        "INSERT INTO doc_chat_messages "
+                        "(id, doc_id, user_id, role, text, doc_applied, "
+                        " created_at) "
+                        "VALUES (?, ?, ?, 'assistant', ?, 1, ?)",
+                        (assistant_msg_id, doc_id, current_user, reply,
+                         now),
+                    )
+                    conn.commit()
+            else:
+                with get_db_connection() as conn:
+                    _ensure_schema(conn)
+                    conn.execute(
+                        "INSERT INTO doc_chat_messages "
+                        "(id, doc_id, user_id, role, text, doc_applied, "
+                        " created_at) "
+                        "VALUES (?, ?, ?, 'assistant', ?, 0, ?)",
+                        (assistant_msg_id, doc_id, current_user, reply,
+                         now),
+                    )
+                    conn.commit()
+
+            yield _sse({
+                "type": "done",
+                "reply": reply,
+                "doc_body": doc_body,
+                "snapshot_id": snapshot_id,
+                "message_id": assistant_msg_id,
+                "model": model_used,
+            })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("doc chat stream failed: %s", exc)
             yield _sse({"type": "error", "message": str(exc)[:500]})
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
