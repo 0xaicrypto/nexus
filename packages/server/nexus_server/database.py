@@ -519,6 +519,79 @@ def init_db() -> None:
         """
     )
 
+    # ── Writing Studio (P1) ─────────────────────────────────────────
+    # See docs/design/WRITING_STUDIO_DESIGN.docx §3/§5/§6. Three tables:
+    #
+    #   docs            — one row per document. ``body`` is a Markdown
+    #                     subset where data references appear as
+    #                     ``{{ref:ID}}`` placeholders (chip serialization).
+    #   doc_references  — chip metadata. ``snapshot`` is the FROZEN,
+    #                     DE-IDENTIFIED text captured at insert time
+    #                     (source data drift never rewrites it — the
+    #                     doc stays reproducible). ``source_nodes`` is
+    #                     a JSON list of clinical_graph node ids /
+    #                     source row ids for provenance hover.
+    #   doc_snapshots   — version chain. One row per body-changing
+    #                     save; capped at the latest 50 per doc by the
+    #                     writer (writing_router).
+    #
+    # All rows are user_id-scoped; every query in writing_router.py
+    # filters on user_id so one medic can never read another's docs.
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS docs (
+            id         TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL,
+            title      TEXT NOT NULL DEFAULT '',
+            body       TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_docs_user "
+        "ON docs(user_id, updated_at DESC)"
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS doc_references (
+            id           TEXT PRIMARY KEY,
+            doc_id       TEXT NOT NULL,
+            user_id      TEXT NOT NULL,
+            ref_type     TEXT NOT NULL,              -- 'patient' | 'study' | 'file'
+            target_id    TEXT NOT NULL,              -- patient_hash / study_id / file_id
+            granularity  TEXT NOT NULL DEFAULT '',   -- 'basics' | 'timeline' | 'progress' | 'roster' | ...
+            snapshot     TEXT NOT NULL DEFAULT '',   -- de-identified text, frozen at insert
+            source_nodes TEXT NOT NULL DEFAULT '[]', -- JSON list of provenance node ids
+            created_at   TIMESTAMP NOT NULL,
+            FOREIGN KEY (doc_id) REFERENCES docs(id)
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_doc_references_doc "
+        "ON doc_references(user_id, doc_id, created_at)"
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS doc_snapshots (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            doc_id     TEXT NOT NULL,
+            user_id    TEXT NOT NULL,
+            body       TEXT NOT NULL,
+            label      TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL,
+            FOREIGN KEY (doc_id) REFERENCES docs(id)
+        )
+        """
+    )
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_doc_snapshots_doc "
+        "ON doc_snapshots(user_id, doc_id, id DESC)"
+    )
+
     conn.commit()
     conn.close()
     logger.info("Database initialized")

@@ -789,6 +789,12 @@ def create_app() -> FastAPI:
     from nexus_server import research_router as _research_router
     app.include_router(_research_router.router)
     app.include_router(_research_router.patients_studies_router)
+    # Writing Studio (P1) — /api/v1/docs/*: documents, version
+    # snapshots, de-identified data reference chips, selection polish
+    # (SSE), PHI scan and the docx export gate. See
+    # docs/design/WRITING_STUDIO_DESIGN.docx.
+    from nexus_server import writing_router as _writing_router
+    app.include_router(_writing_router.router)
 
     # #143 — serve the Cornerstone3D viewer.html as a static page.
     # Desktop launches the user's default browser at

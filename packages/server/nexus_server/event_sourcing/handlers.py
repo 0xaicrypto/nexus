@@ -509,6 +509,16 @@ def _h_study_report_generated(cur, event):          pass
 
 
 # ─────────────────────────────────────────────────────────────────────
+# Writing Studio (P1)
+#
+# Audit-only: the doc_references projection is written via direct SQL
+# in writing_router.py (same pattern as scheduled_tasks / research_*).
+# ─────────────────────────────────────────────────────────────────────
+
+def _h_doc_reference_created(cur, event):           pass
+
+
+# ─────────────────────────────────────────────────────────────────────
 # Register all handlers at module import time.
 # ─────────────────────────────────────────────────────────────────────
 
@@ -616,6 +626,10 @@ _REGISTRATIONS: tuple[tuple[EventKind, str, Any], ...] = (
     (EventKind.STUDY_OBSERVATION_CONFIRMED,     "1.0", _h_study_observation_confirmed),
     (EventKind.STUDY_OBSERVATION_UNLINKED,      "1.0", _h_study_observation_unlinked),
     (EventKind.STUDY_REPORT_GENERATED,          "1.0", _h_study_report_generated),
+
+    # Writing Studio (P1) — audit-only; projection via direct SQL in
+    # writing_router.py.
+    (EventKind.DOC_REFERENCE_CREATED,           "1.0", _h_doc_reference_created),
 )
 
 

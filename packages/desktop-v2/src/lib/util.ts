@@ -78,10 +78,12 @@ export const MODE_LABELS: Record<ModeKind, string> = {
   research: 'Research',
 };
 
-// Workspace = top-level Patient vs Research toggle (decisions D1 + D14).
-// The active workspace lives in the Zustand store; the patient-side
-// modes above keep their existing per-patient meaning.
-export type Workspace = 'patient' | 'research';
+// Workspace = top-level Patient / Research / Writing toggle (decisions
+// D1 + D14; Writing Studio added as the third top-level surface — see
+// components/writing-studio.tsx). The active workspace lives in the
+// Zustand store; the patient-side modes above keep their existing
+// per-patient meaning.
+export type Workspace = 'patient' | 'research' | 'writing';
 
 // Research Workspace shapes returned by /api/v1/research/* endpoints.
 export interface StudySummary {

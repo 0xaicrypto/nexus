@@ -2043,6 +2043,237 @@ class _ApiClient {
   }
 
   // ───────────────────────────────────────────────────────────────
+  // Writing Studio — /api/v1/docs (P1). See components/writing-studio.tsx.
+  // ───────────────────────────────────────────────────────────────
+
+  /** GET /docs — the medic's writing documents, for the left rail. */
+  async listWritingDocs(): Promise<WritingDocMeta[]> {
+    interface RawDoc {
+      id: string; title: string; updated_at: string; ref_count: number;
+    }
+    const r = await this.fetch<{ docs: RawDoc[] }>('/api/v1/docs');
+    return (r.docs ?? []).map((d) => ({
+      id:        d.id,
+      title:     d.title,
+      updatedAt: d.updated_at,
+      refCount:  d.ref_count ?? 0,
+    }));
+  }
+
+  /** POST /docs — create an empty document. */
+  async createWritingDoc(title: string): Promise<{ id: string }> {
+    const r = await this.fetch<{ id: string }>('/api/v1/docs', {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    });
+    return { id: r.id };
+  }
+
+  /** GET /docs/{id} — full body + reference chips. */
+  async getWritingDoc(id: string): Promise<WritingDoc> {
+    interface RawRef {
+      ref_id: string; ref_type: string; target_id: string;
+      granularity: string; chip_label: string;
+      snapshot_preview: string; created_at: string;
+    }
+    interface Raw {
+      id: string; title: string; body: string; references: RawRef[];
+    }
+    const r = await this.fetch<Raw>(
+      `/api/v1/docs/${encodeURIComponent(id)}`,
+    );
+    return {
+      id:    r.id,
+      title: r.title,
+      body:  r.body,
+      references: (r.references ?? []).map((x) => ({
+        refId:           x.ref_id,
+        refType:         x.ref_type as WritingReference['refType'],
+        targetId:        x.target_id,
+        granularity:     x.granularity as WritingReference['granularity'],
+        chipLabel:       x.chip_label,
+        snapshotPreview: x.snapshot_preview,
+        createdAt:       x.created_at,
+      })),
+    };
+  }
+
+  /** PUT /docs/{id} — autosave (title and/or body). */
+  async updateWritingDoc(
+    id: string,
+    patch: { title?: string; body?: string },
+  ): Promise<void> {
+    const body: Record<string, string> = {};
+    if (patch.title !== undefined) body.title = patch.title;
+    if (patch.body  !== undefined) body.body  = patch.body;
+    await this.fetch<{ ok: boolean }>(
+      `/api/v1/docs/${encodeURIComponent(id)}`,
+      { method: 'PUT', body: JSON.stringify(body) },
+    );
+  }
+
+  /** DELETE /docs/{id}. */
+  async deleteWritingDoc(id: string): Promise<void> {
+    await this.fetch<unknown>(
+      `/api/v1/docs/${encodeURIComponent(id)}`,
+      { method: 'DELETE' },
+    );
+  }
+
+  /** GET /docs/{id}/snapshots — version history for the right rail. */
+  async listWritingSnapshots(id: string): Promise<WritingSnapshot[]> {
+    interface RawSnap { id: string; label: string; created_at: string }
+    const r = await this.fetch<{ snapshots: RawSnap[] }>(
+      `/api/v1/docs/${encodeURIComponent(id)}/snapshots`,
+    );
+    return (r.snapshots ?? []).map((s) => ({
+      id: s.id, label: s.label, createdAt: s.created_at,
+    }));
+  }
+
+  /** POST /docs/{id}/snapshots/{sid}/restore → the restored body. */
+  async restoreWritingSnapshot(id: string, snapshotId: string): Promise<string> {
+    const r = await this.fetch<{ ok: boolean; body: string }>(
+      `/api/v1/docs/${encodeURIComponent(id)}/snapshots/` +
+      `${encodeURIComponent(snapshotId)}/restore`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    return r.body;
+  }
+
+  /** POST /docs/{id}/references — mint a de-identified reference chip.
+   *  The server snapshots the target at the chosen granularity and
+   *  returns the chip label + preview text. */
+  async createWritingReference(
+    id: string,
+    input: {
+      refType: 'patient' | 'study';
+      targetId: string;
+      granularity: WritingRefGranularity;
+    },
+  ): Promise<{ refId: string; chipLabel: string; snapshotPreview: string }> {
+    interface Raw {
+      ref_id: string; chip_label: string; snapshot_preview: string;
+    }
+    const r = await this.fetch<Raw>(
+      `/api/v1/docs/${encodeURIComponent(id)}/references`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          ref_type:    input.refType,
+          target_id:   input.targetId,
+          granularity: input.granularity,
+        }),
+      },
+    );
+    return {
+      refId:           r.ref_id,
+      chipLabel:       r.chip_label,
+      snapshotPreview: r.snapshot_preview,
+    };
+  }
+
+  /**
+   * POST /docs/{id}/polish — stream the revised selection. Same SSE
+   * frame parsing as ``sendChat`` above (``data: {...}\n\n``).
+   */
+  async *polishWritingDoc(
+    id: string,
+    input: { selection: string; instruction: string; refIds: string[] },
+    abortSignal?: AbortSignal,
+  ): AsyncIterable<WritingPolishFrame> {
+    const path = `/api/v1/docs/${encodeURIComponent(id)}/polish`;
+    const r = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        selection:   input.selection,
+        instruction: input.instruction,
+        ref_ids:     input.refIds,
+      }),
+      signal: abortSignal,
+    });
+    if (!r.ok || !r.body) {
+      throw new ApiError(r.status, await r.text().catch(() => r.statusText), path);
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    if (abortSignal) {
+      abortSignal.addEventListener('abort', () => {
+        try { reader.cancel(); } catch { /* already cancelled */ }
+      }, { once: true });
+    }
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try {
+                yield JSON.parse(line.slice(6)) as WritingPolishFrame;
+              } catch { /* malformed payload; skip */ }
+            }
+          }
+        }
+      }
+    } finally {
+      try { reader.releaseLock(); } catch { /* ok */ }
+    }
+  }
+
+  /** POST /docs/{id}/phi-scan — rule+model PHI findings for the gate. */
+  async phiScanWritingDoc(id: string): Promise<WritingPhiFinding[]> {
+    interface RawFinding {
+      kind: string; excerpt: string; start: number; end: number;
+      suggestion: string;
+    }
+    const r = await this.fetch<{ findings: RawFinding[] }>(
+      `/api/v1/docs/${encodeURIComponent(id)}/phi-scan`,
+      { method: 'POST', body: JSON.stringify({}) },
+    );
+    return (r.findings ?? []).map((f) => ({
+      kind: f.kind, excerpt: f.excerpt, start: f.start, end: f.end,
+      suggestion: f.suggestion,
+    }));
+  }
+
+  /**
+   * POST /docs/{id}/export → the .docx bytes as a Blob. Throws
+   * ``ApiError`` with ``status===422 && code==='phi_unresolved'`` when
+   * the server refuses because PHI findings are unresolved — the
+   * caller then runs phiScanWritingDoc + reopens the gate modal.
+   */
+  async exportWritingDocx(
+    id: string,
+    input: { resolutions: WritingPhiResolution[]; includeSources: boolean },
+  ): Promise<Blob> {
+    const path = `/api/v1/docs/${encodeURIComponent(id)}/export`;
+    const r = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        resolutions: input.resolutions.map((x) => ({
+          start:  x.start,
+          end:    x.end,
+          action: x.action,
+          ...(x.replacement !== undefined ? { replacement: x.replacement } : {}),
+        })),
+        include_sources: input.includeSources,
+      }),
+    });
+    if (!r.ok) {
+      throw new ApiError(r.status, await r.text().catch(() => r.statusText), path);
+    }
+    return r.blob();
+  }
+
+  // ───────────────────────────────────────────────────────────────
   // Research Workspace — /api/v1/research/* (design §6)
   // ───────────────────────────────────────────────────────────────
 
@@ -2819,6 +3050,76 @@ function rawScheduledTaskToView(r: {
     updatedAt:      r.updated_at,
     cancelledAt:    r.cancelled_at,
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Writing Studio types (P1) — wire shapes for /api/v1/docs/*.
+// ─────────────────────────────────────────────────────────────────────
+
+/** One row in the Writing Studio's left-rail document list. */
+export interface WritingDocMeta {
+  id: string;
+  title: string;
+  /** ISO-8601 server timestamp of the last PUT. */
+  updatedAt: string;
+  refCount: number;
+}
+
+/** What a reference chip can snapshot. Patient side: basics /
+ *  timeline; study side: progress / roster. */
+export type WritingRefGranularity =
+  | 'basics' | 'timeline' | 'progress' | 'roster';
+
+/** One de-identified reference chip attached to a document. The body
+ *  text carries a matching ``{{ref:REF_ID}}`` placeholder token. */
+export interface WritingReference {
+  refId: string;
+  refType: 'patient' | 'study';
+  targetId: string;
+  granularity: WritingRefGranularity;
+  chipLabel: string;
+  snapshotPreview: string;
+  createdAt: string;
+}
+
+/** Full document as returned by GET /docs/{id}. */
+export interface WritingDoc {
+  id: string;
+  title: string;
+  body: string;
+  references: WritingReference[];
+}
+
+/** One entry in GET /docs/{id}/snapshots. */
+export interface WritingSnapshot {
+  id: string;
+  label: string;
+  createdAt: string;
+}
+
+/** SSE frames streamed by POST /docs/{id}/polish. */
+export type WritingPolishFrame =
+  | { type: 'revised_chunk'; text: string }
+  | { type: 'provenance_warning'; numbers: string[] }
+  | { type: 'done'; revised: string }
+  | { type: 'error'; message: string };
+
+/** One PHI finding from POST /docs/{id}/phi-scan. ``start``/``end``
+ *  are body offsets; ``suggestion`` is the proposed replacement. */
+export interface WritingPhiFinding {
+  kind: string;
+  excerpt: string;
+  start: number;
+  end: number;
+  suggestion: string;
+}
+
+/** Per-finding decision sent back with POST /docs/{id}/export. */
+export interface WritingPhiResolution {
+  start: number;
+  end: number;
+  action: 'replace' | 'ignore';
+  replacement?: string;
 }
 
 export const api = new _ApiClient();

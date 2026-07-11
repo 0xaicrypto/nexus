@@ -141,6 +141,14 @@ class EventKind(str, Enum):
     STUDY_OBSERVATION_UNLINKED         = "study_observation_unlinked"
     STUDY_REPORT_GENERATED             = "study_report_generated"
 
+    # ─ Writing Studio (P1) ─────────────────────────────────────────
+    # See docs/design/WRITING_STUDIO_DESIGN.docx §4.2/§5. Emitted every
+    # time a medic inserts a data-reference chip into a document —
+    # "who, when, in which doc, referenced which patient's/study's/
+    # file's which slice of data". Audit-only: the doc_references
+    # projection is maintained by direct SQL in writing_router.py.
+    DOC_REFERENCE_CREATED              = "doc_reference"
+
 
 @dataclass(frozen=True)
 class EventSpec:
@@ -480,6 +488,16 @@ _r(EventSpec(EventKind.STUDY_REPORT_GENERATED, "1.0",
    required_fields=("study_id", "report_kind", "file_id"),
    optional_fields=("rendered_at",),
    description="Interim/final/CONSORT report rendered to a file."))
+
+# Writing Studio (P1). NOT patient_scoped — ref_type may be 'study' or
+# 'file'; the writer passes patient_hash explicitly when ref_type is
+# 'patient' so per-patient audit views still pick these rows up.
+_r(EventSpec(EventKind.DOC_REFERENCE_CREATED, "1.0",
+   required_fields=("doc_id", "ref_id", "ref_type", "target_id",
+                    "granularity"),
+   optional_fields=("source_node_count",),
+   description="A de-identified data reference chip was inserted into "
+               "a Writing Studio document."))
 
 
 # ─────────────────────────────────────────────────────────────────────

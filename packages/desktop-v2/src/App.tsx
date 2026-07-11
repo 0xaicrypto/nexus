@@ -18,6 +18,7 @@ import {
   ImagingMode, LabsMode, MemoryMode, ReportMode,
 } from './modes';
 import { ResearchWorkspace } from './components/research-workspace';
+import { WritingStudio } from './components/writing-studio';
 
 function ActiveMode() {
   const mode = useAppState((s) => s.activeMode);
@@ -102,9 +103,10 @@ function LlmKeyReminderBanner() {
  * docs/design/visual-mock/Research Workspace.dc.html.
  */
 function WorkspaceSwitcher() {
+  const t     = useT();
   const ws    = useAppState((s) => s.activeWorkspace);
   const setWs = useAppState((s) => s.setActiveWorkspace);
-  const btn = (key: 'patient' | 'research', label: string, sub: string) => (
+  const btn = (key: 'patient' | 'research' | 'writing', label: string, sub: string) => (
     <button
       onClick={() => setWs(key)}
       title={sub}
@@ -125,6 +127,7 @@ function WorkspaceSwitcher() {
       <div className="inline-flex bg-surface border border-border rounded-lg p-0.5 gap-0.5">
         {btn('patient',  '患者', 'ad-hoc 单患者视角')}
         {btn('research', '研究', '研究优先工作台（默认）')}
+        {btn('writing',  t('writing.workspaceTab'), t('writing.workspaceHint'))}
       </div>
     </div>
   );
@@ -138,6 +141,9 @@ function WorkspaceBody() {
   const ws = useAppState((s) => s.activeWorkspace);
   if (ws === 'research') {
     return <ResearchWorkspace />;
+  }
+  if (ws === 'writing') {
+    return <WritingStudio />;
   }
   return (
     <>

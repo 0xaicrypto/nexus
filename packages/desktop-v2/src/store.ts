@@ -141,6 +141,19 @@ interface AppState {
   // chatMsgsBySession).
   drafts: Record<string, string>;
   setDraft: (key: string, text: string) => void;
+
+  // Writing Studio (P1) ──────────────────────────────
+  // ``activeWritingDocId`` survives workspace switches so the medic
+  // returns to the same document. ``writingDrafts`` mirrors the chat
+  // draft policy: title+body live here (keyed by doc id) so a tab
+  // switch mid-sentence never loses text; the 1.5s autosave PUT is
+  // just persistence, not the source of truth for the open editor.
+  // Wiped on logout / identity switch like chat drafts.
+  activeWritingDocId: string | null;
+  setActiveWritingDocId: (id: string | null) => void;
+  writingDrafts: Record<string, { title: string; body: string }>;
+  setWritingDraft: (docId: string, draft: { title: string; body: string }) => void;
+  clearWritingDraft: (docId: string) => void;
   draftAttachments: Record<string, DraftAttachment[]>;
   setDraftAttachments: (
     key: string,
@@ -453,6 +466,9 @@ export const useAppState = create<AppState>((set, get) => ({
       // F-draft-persist — same policy for composer drafts.
       drafts:           {},
       draftAttachments: {},
+      // Writing Studio — docs belong to the outgoing identity.
+      activeWritingDocId: null,
+      writingDrafts:      {},
     });
   },
 
@@ -487,6 +503,9 @@ export const useAppState = create<AppState>((set, get) => ({
       // F-draft-persist — see resetForIdentitySwitch.
       drafts:           {},
       draftAttachments: {},
+      // Writing Studio — see resetForIdentitySwitch.
+      activeWritingDocId: null,
+      writingDrafts:      {},
     });
   },
 
@@ -502,7 +521,7 @@ export const useAppState = create<AppState>((set, get) => ({
   activeWorkspace: ((): Workspace => {
     try {
       const v = localStorage.getItem('nexus.activeWorkspace');
-      if (v === 'patient' || v === 'research') return v;
+      if (v === 'patient' || v === 'research' || v === 'writing') return v;
     } catch { /* ignore */ }
     return 'research';
   })(),
@@ -572,6 +591,19 @@ export const useAppState = create<AppState>((set, get) => ({
   draftAttachments: {},
   setDraft: (key, text) =>
     set((s) => ({ drafts: { ...s.drafts, [key]: text } })),
+
+  // Writing Studio (P1) — see interface block.
+  activeWritingDocId: null,
+  setActiveWritingDocId: (id) => set({ activeWritingDocId: id }),
+  writingDrafts: {},
+  setWritingDraft: (docId, draft) =>
+    set((s) => ({ writingDrafts: { ...s.writingDrafts, [docId]: draft } })),
+  clearWritingDraft: (docId) =>
+    set((s) => {
+      const next = { ...s.writingDrafts };
+      delete next[docId];
+      return { writingDrafts: next };
+    }),
   setDraftAttachments: (key, atts) =>
     set((s) => {
       const prev = s.draftAttachments[key]
