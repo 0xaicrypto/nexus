@@ -695,6 +695,7 @@ fn llm_env_status() -> serde_json::Value {
         "has_gemini_key":   has_key("GEMINI_API_KEY"),
         "has_openai_key":   has_key("OPENAI_API_KEY"),
         "has_anthropic_key":has_key("ANTHROPIC_API_KEY"),
+        "has_kimi_key":     has_key("KIMI_API_KEY") || has_key("MOONSHOT_API_KEY"),
         // serde_json::json! takes JSON-literal tokens, not Rust generics —
         // ``null`` is what you write for an explicit null.
         "advisory":         null,

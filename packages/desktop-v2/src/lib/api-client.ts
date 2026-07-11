@@ -1501,6 +1501,7 @@ class _ApiClient {
       has_gemini_key: boolean;
       has_openai_key: boolean;
       has_anthropic_key: boolean;
+      has_kimi_key?: boolean;
       advisory: string | null;
       active_key_source?: string | null;
       active_key_preview?: string | null;
@@ -1526,6 +1527,7 @@ class _ApiClient {
         hasGeminiKey:    r.has_gemini_key,
         hasOpenaiKey:    r.has_openai_key,
         hasAnthropicKey: r.has_anthropic_key,
+        hasKimiKey:      r.has_kimi_key ?? false,
         advisory:        r.advisory,
         activeKeySource: (r.active_key_source ?? null) as LlmStatus['activeKeySource'],
         activeKeyPreview: r.active_key_preview ?? '',
@@ -1547,6 +1549,7 @@ class _ApiClient {
           hasGeminiKey:    ipc.has_gemini_key,
           hasOpenaiKey:    ipc.has_openai_key,
           hasAnthropicKey: ipc.has_anthropic_key,
+          hasKimiKey:      ipc.has_kimi_key ?? false,
           advisory:        ipc.advisory,
           activeKeySource: 'env',
           activeKeyPreview: '',
@@ -1595,11 +1598,12 @@ class _ApiClient {
   }
 
   async putLlmSettings(input: {
-    provider?: 'gemini' | 'openai' | 'anthropic';
+    provider?: 'gemini' | 'openai' | 'anthropic' | 'kimi';
     model?: string;
     geminiApiKey?: string;
     openaiApiKey?: string;
     anthropicApiKey?: string;
+    kimiApiKey?: string;
   }): Promise<{ ok: boolean; writtenKeys: string[]; status: LlmStatus; viaFallback?: boolean }> {
     interface Raw {
       ok: boolean;
@@ -1613,6 +1617,7 @@ class _ApiClient {
         has_gemini_key: boolean;
         has_openai_key: boolean;
         has_anthropic_key: boolean;
+        has_kimi_key?: boolean;
         advisory: string | null;
         active_key_source?: string | null;
         active_key_preview?: string | null;
@@ -1625,6 +1630,7 @@ class _ApiClient {
     if (input.geminiApiKey)    body.gemini_api_key    = input.geminiApiKey;
     if (input.openaiApiKey)    body.openai_api_key    = input.openaiApiKey;
     if (input.anthropicApiKey) body.anthropic_api_key = input.anthropicApiKey;
+    if (input.kimiApiKey)      body.kimi_api_key      = input.kimiApiKey;
     try {
       const r = await this.fetch<Raw>('/api/v1/settings/llm', {
         method: 'PUT',
@@ -1641,6 +1647,7 @@ class _ApiClient {
           hasGeminiKey:    r.status.has_gemini_key,
           hasOpenaiKey:    r.status.has_openai_key,
           hasAnthropicKey: r.status.has_anthropic_key,
+          hasKimiKey:      r.status.has_kimi_key ?? false,
           advisory:        r.status.advisory,
           activeKeySource: (r.status.active_key_source ?? null) as LlmStatus['activeKeySource'],
           activeKeyPreview: r.status.active_key_preview ?? '',
@@ -1658,6 +1665,7 @@ class _ApiClient {
       if (input.geminiApiKey)    updates.GEMINI_API_KEY       = input.geminiApiKey;
       if (input.openaiApiKey)    updates.OPENAI_API_KEY       = input.openaiApiKey;
       if (input.anthropicApiKey) updates.ANTHROPIC_API_KEY    = input.anthropicApiKey;
+      if (input.kimiApiKey)      updates.KIMI_API_KEY         = input.kimiApiKey;
 
       const ipc = await tauriInvoke<Raw>('llm_env_write', { updates });
       if (!ipc) {
@@ -1677,6 +1685,7 @@ class _ApiClient {
           hasGeminiKey:    ipc.status.has_gemini_key,
           hasOpenaiKey:    ipc.status.has_openai_key,
           hasAnthropicKey: ipc.status.has_anthropic_key,
+          hasKimiKey:      ipc.status.has_kimi_key ?? false,
           advisory:        ipc.status.advisory,
           activeKeySource: 'env',
           activeKeyPreview: '',

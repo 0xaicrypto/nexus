@@ -485,10 +485,11 @@ export function SettingsDataView() {
 
 /* ───────────── Settings · LLM body ───────────── */
 
-const DEFAULT_MODEL_FOR: Record<'gemini' | 'openai' | 'anthropic', string> = {
+const DEFAULT_MODEL_FOR: Record<'gemini' | 'openai' | 'anthropic' | 'kimi', string> = {
   gemini:    'gemini-2.5-flash',
   openai:    'gpt-4o',
   anthropic: 'claude-sonnet-4-20250514',
+  kimi:      'kimi-k2.7-code',
 };
 
 function LlmSettingsBody() {
@@ -500,11 +501,12 @@ function LlmSettingsBody() {
 
   // Form state — initialised from status. Keys are write-only inputs;
   // the server never returns the secret value.
-  const [provider, setProvider] = useState<'gemini' | 'openai' | 'anthropic'>('gemini');
+  const [provider, setProvider] = useState<'gemini' | 'openai' | 'anthropic' | 'kimi'>('gemini');
   const [model, setModel]       = useState<string>('');
   const [geminiKey,    setGeminiKey]    = useState('');
   const [openaiKey,    setOpenaiKey]    = useState('');
   const [anthropicKey, setAnthropicKey] = useState('');
+  const [kimiKey,      setKimiKey]      = useState('');
 
   // ── Test-Key state (F12) ─────────────────────────────────────────
   // Triggers a real live call against the in-process active provider
@@ -562,6 +564,7 @@ function LlmSettingsBody() {
         hasGeminiKey:    false,
         hasOpenaiKey:    false,
         hasAnthropicKey: false,
+        hasKimiKey:      false,
         advisory: null,
         activeKeySource: 'none',
         activeKeyPreview: '',
@@ -584,6 +587,7 @@ function LlmSettingsBody() {
         geminiApiKey:    geminiKey || undefined,
         openaiApiKey:    openaiKey || undefined,
         anthropicApiKey: anthropicKey || undefined,
+        kimiApiKey:      kimiKey || undefined,
       });
       setStatus(r.status);
       // Clear key inputs after a successful write — they're on disk
@@ -591,6 +595,7 @@ function LlmSettingsBody() {
       setGeminiKey('');
       setOpenaiKey('');
       setAnthropicKey('');
+      setKimiKey('');
       // Refresh the global llmStatus so the startup reminder banner
       // disappears the instant the key is saved.
       refreshLlmStatus();
@@ -670,7 +675,7 @@ function LlmSettingsBody() {
         </h2>
         <Card>
           <div className="mb-3 flex gap-2">
-            {(['gemini', 'openai', 'anthropic'] as const).map((p) => (
+            {(['gemini', 'openai', 'anthropic', 'kimi'] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => {
@@ -698,7 +703,7 @@ function LlmSettingsBody() {
           />
           <p className="mt-2 text-caption text-text-tertiary">
             Defaults per <span className="font-mono">packages/nexus/ARCHITECTURE.md</span>:
-            {' '}gemini-2.5-flash · gpt-4o · claude-sonnet-4-20250514.
+            {' '}gemini-2.5-flash · gpt-4o · claude-sonnet-4-20250514 · kimi-k2.7-code.
           </p>
         </Card>
       </div>
@@ -746,6 +751,19 @@ function LlmSettingsBody() {
                 value={anthropicKey}
                 onChange={(e) => setAnthropicKey(e.target.value)}
                 placeholder={status.hasAnthropicKey ? 'Replace existing key (leave empty to keep)' : 'sk-ant-…'}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-caption text-text-primary">Kimi (Moonshot)</span>
+                {keyChip(status.hasKimiKey)}
+              </div>
+              <Input
+                type="password"
+                value={kimiKey}
+                onChange={(e) => setKimiKey(e.target.value)}
+                placeholder={status.hasKimiKey ? 'Replace existing key (leave empty to keep)' : 'sk-…（platform.moonshot.ai）'}
                 autoComplete="off"
               />
             </div>
@@ -799,7 +817,8 @@ function LlmSettingsBody() {
               disabled={testing || !(
                 (status.provider === 'gemini'    && status.hasGeminiKey)    ||
                 (status.provider === 'openai'    && status.hasOpenaiKey)    ||
-                (status.provider === 'anthropic' && status.hasAnthropicKey)
+                (status.provider === 'anthropic' && status.hasAnthropicKey) ||
+                (status.provider === 'kimi'      && status.hasKimiKey)
               )}
             >
               {testing ? '正在测试…' : 'Test Key now ↗'}
@@ -834,7 +853,7 @@ function LlmSettingsBody() {
                   )}
                   {testResult.diagnosis === 'key_invalid' && (
                     <div className="text-text-secondary">
-                      → 上面输入框里粘贴一个新的 Gemini/OpenAI/Anthropic key,然后 Save。
+                      → 上面输入框里粘贴一个新的 Gemini/OpenAI/Anthropic/Kimi key,然后 Save。
                     </div>
                   )}
                   {testResult.diagnosis === 'quota_exceeded' && (

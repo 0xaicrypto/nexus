@@ -746,6 +746,7 @@ export const useAppState = create<AppState>((set, get) => ({
             hasGeminiKey: false,
             hasOpenaiKey: false,
             hasAnthropicKey: false,
+            hasKimiKey: false,
             advisory:
               "This Nexus server build is missing /api/v1/settings/llm — " +
               "restart the FastAPI sidecar from source (or rebuild the " +

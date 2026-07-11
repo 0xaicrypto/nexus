@@ -84,13 +84,14 @@ export interface StudyInfo {
  *  never leave the server. ``advisory`` is non-null when the active
  *  provider has no key configured, so the UI can render a banner. */
 export interface LlmStatus {
-  provider: 'gemini' | 'openai' | 'anthropic';
+  provider: 'gemini' | 'openai' | 'anthropic' | 'kimi';
   model: string;
   envFilePath: string;
   envFileExists: boolean;
   hasGeminiKey: boolean;
   hasOpenaiKey: boolean;
   hasAnthropicKey: boolean;
+  hasKimiKey: boolean;
   advisory: string | null;
   /** Where the active provider's key came from. Lets the medic
    *  answer "did my DB-saved key actually load?" without grepping
