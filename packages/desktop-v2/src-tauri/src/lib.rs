@@ -511,6 +511,45 @@ fn spawn_backend_sidecar(app: &AppHandle) -> Result<(), Box<dyn std::error::Erro
     diag.push("sys", format!("env loaded: {} key(s)", user_env.len()));
     log::info!("rune_home: {}", rh.display());
 
+    // Port-preflight: if a previous sidecar died without cleanup (app
+    // crash / force-quit), an orphan nexus-server may still hold 8001
+    // and the fresh spawn dies with EADDRINUSE after a full (and
+    // confusing) successful-looking boot. Find holders of the port and
+    // kill them — but ONLY processes whose command name looks like our
+    // sidecar, so we never kill an unrelated dev server.
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        let port = std::env::var("NEXUS_PORT").unwrap_or_else(|_| "8001".into());
+        if let Ok(out) = Command::new("lsof")
+            .args(["-ti", &format!("tcp:{port}")])
+            .output()
+        {
+            for pid in String::from_utf8_lossy(&out.stdout).split_whitespace() {
+                let comm = Command::new("ps")
+                    .args(["-p", pid, "-o", "comm="])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default();
+                if comm.contains("nexus-server") || comm.contains("nexus_server") {
+                    diag.push(
+                        "sys",
+                        format!("port {port} held by orphan sidecar pid={pid} ({comm}) — killing"),
+                    );
+                    let _ = Command::new("kill").args(["-9", pid]).output();
+                } else if !comm.is_empty() {
+                    diag.push(
+                        "sys",
+                        format!(
+                            "WARNING: port {port} held by unrelated process pid={pid} ({comm}) — \
+                             not killing; sidecar bind will fail"
+                        ),
+                    );
+                }
+            }
+        }
+    }
+
     let mut sidecar = match app.shell().sidecar("nexus-server") {
         Ok(c) => c,
         Err(e) => {
