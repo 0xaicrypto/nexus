@@ -9,7 +9,7 @@
  *            and can rewrite the whole document.
  *   right  — the document CANVAS (flex): title + TipTap editor with
  *            a compact collapsible 引用与快照 drawer at the top,
- *            polish toolbar, streamed diff card, status bar.
+ *            revision banner, status bar.
  *
  * Flows:
  *   对话共写     → POST /docs/{id}/chat (SSE). reply_chunk streams into
@@ -26,8 +26,13 @@
  *                  → insert a refChip atom at the caret (editor), or —
  *                  when triggered from the chat composer — append the
  *                  chip label to the message as a context mention.
- *   选中润色     → activated toolbar row → POST /docs/{id}/polish (SSE)
- *                  → word-level diff card (mock3) with per-hunk ✓/✗.
+ *   选中改写     → selecting text in the canvas surfaces a 选中内容
+ *                  quote chip above the chat composer (with 更简洁 /
+ *                  更学术 / 语法修正 / 译为英文 preset chips). Sending
+ *                  a preset or a custom message composes a normal
+ *                  doc-chat turn scoped to the selection; the revision
+ *                  returns through the standard <doc> flow (banner +
+ *                  查看差异 + 撤销).
  *   导出 docx    → POST /docs/{id}/export; on 422 phi_unresolved the
  *                  PHI gate modal (mock4) collects per-finding
  *                  resolutions and re-posts.
@@ -41,8 +46,8 @@
  * DISABLED — only document/paragraph/text/undoRedo survive — so
  * nothing unserializable can enter the doc. draft.body in the store
  * remains the serialized string (re-serialized on every editor
- * update), which keeps autosave, word count, polish offsets, snapshots
- * and the PHI export flow operating on the exact wire format. The
+ * update), which keeps autosave, word count, selection offsets,
+ * snapshots and the PHI export flow operating on the exact wire format. The
  * read-only 预览 toggle renders {{ref:ID}} tokens as inline chips.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -62,12 +67,11 @@ import { useAppState, type WritingChatMsg } from '../store';
 import { cn, patientDisplayLabel } from '../lib/util';
 import { useT } from '../lib/i18n';
 import type { Dict } from '../lib/i18n/en-US';
+import { useAutoScroll } from '../lib/use-auto-scroll';
 import { Button } from './ui';
 import { Modal } from './modal';
 import { CopyButton } from './copy-button';
-import {
-  applyDiff, changeCount, diffWords, type DiffSegment,
-} from '../lib/word-diff';
+import { diffWords, type DiffSegment } from '../lib/word-diff';
 import {
   parseBodyToDoc, REF_TOKEN_RE, serializeDocToBody, type SerialDocNode,
 } from '../lib/writing-doc-serial';
@@ -102,9 +106,9 @@ function wordCount(body: string): number {
 
 /* ── TipTap doc ⇄ serialized-string offset mapping ──────────────
  *
- * Polish still works on START/END INDICES INTO THE SERIALIZED STRING
- * (the same string autosave PUTs), so ProseMirror positions must map
- * onto string offsets. ``doc.textBetween(a, b, '\n', refChipLeafText)``
+ * The selection quote records START/END INDICES INTO THE SERIALIZED
+ * STRING (the same string autosave PUTs), so ProseMirror positions must
+ * map onto string offsets. ``doc.textBetween(a, b, '\n', refChipLeafText)``
  * emits exactly the serialized form of the [a, b) range — '\n' between
  * textblocks (matching serializeDocToBody's join('\n'), incl. empty
  * paragraphs) and each refChip atom as its {{ref:ID}} token — so a
@@ -183,20 +187,13 @@ const GRANULARITY_LABEL_KEY: Record<WritingRefGranularity, keyof Dict> = {
 
 /* ───────────────────────── local state types ───────────────────────── */
 
-interface PolishState {
-  status: 'streaming' | 'ready';
-  /** Frozen body offsets of the selection at run time. */
+/** A canvas selection quoted into the chat composer. ``start``/``end``
+ *  are frozen offsets into the serialized body string at selection
+ *  time (kept for provenance; the chat message embeds the text). */
+interface SelectionQuote {
+  text: string;
   start: number;
   end: number;
-  selection: string;
-  instruction: string;
-  refIds: string[];
-  streamText: string;
-  /** Numbers flagged by provenance_warning frames. */
-  warnings: string[];
-  segments: DiffSegment[] | null;
-  /** Per-change-hunk accept flags (indexed in change-hunk order). */
-  accepted: boolean[];
 }
 
 type PickerRequest =
@@ -259,9 +256,11 @@ export function WritingStudio() {
 
   // Editor UI state
   const [previewMode, setPreviewMode] = useState(false);
-  /** Selection as OFFSETS INTO THE SERIALIZED BODY STRING (kept in
-   *  sync from TipTap's selection via pmPosToOffset). */
-  const [sel, setSel] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+  /** Canvas selection quoted into the chat composer (选中内容 chip).
+   *  Set on non-empty TipTap selections; cleared on dismiss / send /
+   *  doc switch. Ignored while a chat turn streams (canvas is locked
+   *  read-only then anyway). */
+  const [selQuote, setSelQuote] = useState<SelectionQuote | null>(null);
   const [picker, setPicker] = useState<PickerRequest | null>(null);
 
   // Layout: collapsible docs sidebar + the 引用与快照 drawer at the
@@ -282,11 +281,8 @@ export function WritingStudio() {
     && draft.body === '' && chatMsgs !== undefined
     && chatMsgs.length === 0 && !chatStreaming;
 
-  // Polish
-  const [polish, setPolish] = useState<PolishState | null>(null);
-  const [customInstruction, setCustomInstruction] = useState('');
+  // References included as chat context (drawer checkboxes).
   const [excludedRefIds, setExcludedRefIds] = useState<Set<string>>(new Set());
-  const polishAbortRef = useRef<AbortController | null>(null);
 
   // Export / PHI gate
   const [exporting, setExporting] = useState(false);
@@ -299,8 +295,8 @@ export function WritingStudio() {
    * never leaks across docs. ``lastEditorBodyRef`` holds the
    * serialized string of what the editor currently contains — the
    * draft→editor sync effect below only rehydrates when the store
-   * draft diverges from it (doc load, snapshot restore, polish
-   * apply), never while the medic is typing. */
+   * draft diverges from it (doc load, snapshot restore, chat
+   * revision), never while the medic is typing. */
 
   const lastEditorBodyRef = useRef<string | null>(null);
 
@@ -364,11 +360,22 @@ export function WritingStudio() {
         st.setWritingDraft(activeDocId, { title: prev?.title ?? '', body });
       }
     },
+    // Non-empty selection → quote chip above the chat composer. A
+    // collapsed selection does NOT clear an existing quote (the medic
+    // clicks into the composer next); dismiss / send / doc switch do.
+    // Selections while a chat turn streams are ignored (the canvas is
+    // read-only + pointer-locked then anyway).
     onSelectionUpdate: ({ editor: ed }) => {
       const { from, to } = ed.state.selection;
-      const start = pmPosToOffset(ed.state.doc, from);
+      if (from === to) return;
+      if (activeDocId
+          && useAppState.getState().writingChatStreamingByDoc[activeDocId]) {
+        return;
+      }
       const selected = ed.state.doc.textBetween(from, to, '\n', refChipLeafText);
-      setSel({ start, end: start + selected.length });
+      if (!selected.trim()) return;
+      const start = pmPosToOffset(ed.state.doc, from);
+      setSelQuote({ text: selected, start, end: start + selected.length });
     },
   }, [activeDocId]);
 
@@ -423,12 +430,8 @@ export function WritingStudio() {
   /* ── load doc on selection ────────────────────────────────── */
 
   useEffect(() => {
-    // Abort any in-flight polish from the previous doc + reset
-    // per-doc UI state.
-    polishAbortRef.current?.abort();
-    polishAbortRef.current = null;
-    setPolish(null);
-    setSel({ start: 0, end: 0 });
+    // Reset per-doc UI state.
+    setSelQuote(null);
     setPicker(null);
     setPhiFindings(null);
     setPreviewMode(false);
@@ -512,7 +515,7 @@ export function WritingStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeDocId, draftTitle, draftBody]);
 
-  /** Immediate flush — used before polish-apply snapshots + export. */
+  /** Immediate flush — used before export. */
   async function saveNow(docId: string, d: { title: string; body: string }) {
     await api.updateWritingDoc(docId, { title: d.title, body: d.body });
     lastSavedRef.current = { docId, ...d };
@@ -525,10 +528,6 @@ export function WritingStudio() {
   function setDraftTitle(title: string) {
     if (!activeDocId) return;
     setWritingDraft(activeDocId, { title, body: draft?.body ?? '' });
-  }
-  function setDraftBody(body: string) {
-    if (!activeDocId) return;
-    setWritingDraft(activeDocId, { title: draft?.title ?? '', body });
   }
 
   /* ── doc create / delete ──────────────────────────────────── */
@@ -632,7 +631,7 @@ export function WritingStudio() {
    * server starts a turn it may apply a doc revision — abandoning the
    * stream client-side would desync the canvas from the server copy.
    */
-  async function sendChatTurn(text: string) {
+  async function sendChatTurn(text: string, skills: string[] = []) {
     if (!activeDocId) return;
     const docId = activeDocId;
     const st = useAppState.getState();
@@ -662,7 +661,7 @@ export function WritingStudio() {
     let warnings: string[] = [];
     try {
       for await (const frame of api.chatWritingDoc(
-        docId, { message: text, refIds: includedRefIds },
+        docId, { message: text, refIds: includedRefIds, skills },
       )) {
         const g = useAppState.getState();
         if (frame.type === 'reply_chunk') {
@@ -752,97 +751,26 @@ export function WritingStudio() {
     });
   }
 
-  /* ── polish ───────────────────────────────────────────────── */
+  /* ── chat context refs + selection quote ──────────────────── */
 
   const includedRefIds = references
     .filter((r) => !excludedRefIds.has(r.refId))
     .map((r) => r.refId);
-  const hasSelection = sel.end > sel.start;
 
-  async function runPolish(instruction: string, reuse?: PolishState) {
-    if (!activeDocId || draft === undefined) return;
-    const start = reuse ? reuse.start : sel.start;
-    const end   = reuse ? reuse.end   : sel.end;
-    if (end <= start) { showToast(t('writing.polish.selectHint'), 'info'); return; }
-    const selection = reuse ? reuse.selection : draft.body.slice(start, end);
-    const refIds = reuse ? reuse.refIds : includedRefIds;
-
-    polishAbortRef.current?.abort();
-    const ac = new AbortController();
-    polishAbortRef.current = ac;
-
-    const base: PolishState = {
-      status: 'streaming', start, end, selection, instruction, refIds,
-      streamText: '', warnings: [], segments: null, accepted: [],
-    };
-    setPolish(base);
-    try {
-      for await (const frame of api.polishWritingDoc(
-        activeDocId, { selection, instruction, refIds }, ac.signal,
-      )) {
-        if (ac.signal.aborted) return;
-        if (frame.type === 'revised_chunk') {
-          setPolish((p) => p && { ...p, streamText: p.streamText + frame.text });
-        } else if (frame.type === 'provenance_warning') {
-          setPolish((p) => p && { ...p, warnings: frame.numbers ?? [] });
-        } else if (frame.type === 'done') {
-          const segments = diffWords(selection, frame.revised);
-          setPolish((p) => p && {
-            ...p,
-            status: 'ready',
-            streamText: frame.revised,
-            segments,
-            accepted: new Array(changeCount(segments)).fill(true),
-          });
-        } else if (frame.type === 'error') {
-          throw new Error(frame.message);
-        }
-      }
-    } catch (e) {
-      if (ac.signal.aborted) return;
-      setPolish(null);
-      showToast(t('writing.polish.failed', { error: errMsg(e) }), 'error');
-    }
+  /** Compose the selection-scoped chat message (选中内容 quote chip +
+   *  preset/custom instruction). The revision comes back through the
+   *  standard <doc> flow — banner + 查看差异 + 撤销 — so no dedicated
+   *  endpoint is needed. */
+  function composeQuoteMessage(selection: string, instruction: string): string {
+    return `请只修改下面选中的段落，其余部分保持原样：\n「${selection}」\n\n要求：${instruction}`;
   }
 
-  function applyPolish(acceptedFlags: boolean[]) {
-    if (!activeDocId || !polish || !polish.segments || draft === undefined) return;
-    const merged = applyDiff(polish.segments, acceptedFlags);
-    const body = draft.body;
-    let { start, end } = polish;
-    // The body may have drifted since the selection was frozen (the
-    // medic kept typing). Re-anchor on the exact selection text.
-    if (body.slice(start, end) !== polish.selection) {
-      const idx = body.indexOf(polish.selection);
-      if (idx === -1) {
-        showToast(t('writing.polish.failed', { error: 'selection changed' }), 'error');
-        return;
-      }
-      start = idx;
-      end = idx + polish.selection.length;
-    }
-    const newBody = body.slice(0, start) + merged + body.slice(end);
-    const newDraft = { title: draft.title, body: newBody };
-    // Rehydrate the editor from the spliced string FIRST (sets
-    // lastEditorBodyRef so the sync effect no-ops) with the caret at
-    // the end of the merged region, then persist the draft.
-    if (editor && !editor.isDestroyed) {
-      applyBodyToEditor(editor, newBody, start + merged.length);
-    }
-    setDraftBody(newBody);
-    setPolish(null);
-    const docId = activeDocId;
-    void (async () => {
-      try {
-        // Immediate PUT — the server snapshots on save, which is what
-        // makes the polish revertible from 快照历史.
-        await saveNow(docId, newDraft);
-        setSnapshots(await api.listWritingSnapshots(docId));
-        showToast(t('writing.polish.applied'), 'success');
-      } catch (e) {
-        showToast(t('writing.editor.saveFailed', { error: errMsg(e) }), 'error');
-      }
-    })();
+  /** Chat send entry point for the panel. Wraps the message with the
+   *  active selection quote (which auto-clears on send). */
+  function onChatSend(text: string, skills: string[]) {
+    const message = selQuote ? composeQuoteMessage(selQuote.text, text) : text;
+    setSelQuote(null);
+    void sendChatTurn(message, skills);
   }
 
   /* ── snapshots ────────────────────────────────────────────── */
@@ -915,7 +843,9 @@ export function WritingStudio() {
         <WritingChatPanel
           docId={activeDocId}
           streaming={chatStreaming}
-          onSend={(text) => void sendChatTurn(text)}
+          selQuote={selQuote}
+          onDismissQuote={() => setSelQuote(null)}
+          onSend={onChatSend}
           onAtTyped={() => setPicker({ kind: 'chat' })}
           onUndoRevision={(sid) => void onUndoRevision(sid)}
         />
@@ -1091,38 +1021,6 @@ export function WritingStudio() {
                 </div>
               )}
 
-              {/* polish toolbar — activates on non-empty selection */}
-              {!previewMode && (
-                <PolishToolbar
-                  active={hasSelection && !chatStreaming}
-                  refCount={includedRefIds.length}
-                  customInstruction={customInstruction}
-                  onCustomInstructionChange={setCustomInstruction}
-                  onRun={(instruction) => void runPolish(instruction)}
-                />
-              )}
-
-              {/* diff card */}
-              {polish && (
-                <PolishDiffCard
-                  polish={polish}
-                  onToggleHunk={(idx, accept) =>
-                    setPolish((p) => {
-                      if (!p) return p;
-                      const accepted = [...p.accepted];
-                      accepted[idx] = accept;
-                      return { ...p, accepted };
-                    })}
-                  onAcceptAll={() =>
-                    polish.segments && applyPolish(polish.segments.map(() => true))}
-                  onRejectAll={() => {
-                    polishAbortRef.current?.abort();
-                    setPolish(null);
-                  }}
-                  onRegenerate={() => void runPolish(polish.instruction, polish)}
-                  onApply={() => applyPolish(polish.accepted)}
-                />
-              )}
               <div className="h-6 shrink-0" />
             </div>
 
@@ -1393,7 +1291,8 @@ function PreviewBody({
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   Polish toolbar — activated row (P1: no floating positioning)
+   Selection quote presets — shown above the chat composer while a
+   选中内容 quote chip is active. Reuse the writing.polish.* i18n keys.
    ════════════════════════════════════════════════════════════════════ */
 
 const POLISH_PRESET_KEYS: Array<keyof Dict> = [
@@ -1402,217 +1301,6 @@ const POLISH_PRESET_KEYS: Array<keyof Dict> = [
   'writing.polish.presetGrammar',
   'writing.polish.presetEnglish',
 ];
-
-function PolishToolbar({
-  active, refCount, customInstruction, onCustomInstructionChange, onRun,
-}: {
-  active: boolean;
-  refCount: number;
-  customInstruction: string;
-  onCustomInstructionChange: (v: string) => void;
-  onRun: (instruction: string) => void;
-}) {
-  const t = useT();
-  return (
-    <div
-      className={cn(
-        'flex shrink-0 flex-wrap items-center gap-2 rounded-full border px-4 py-2',
-        'transition-colors duration-150',
-        active
-          ? 'border-rw-accent-bd bg-rw-surface'
-          : 'border-rw-border bg-transparent opacity-60',
-      )}
-      title={active ? undefined : t('writing.polish.selectHint')}
-    >
-      <span className="flex items-center gap-1 text-[13px] font-semibold text-rw-accent">
-        <Sparkles size={13} />
-        {t('writing.polish.title')}
-      </span>
-      {POLISH_PRESET_KEYS.map((k) => (
-        <button
-          key={k}
-          type="button"
-          disabled={!active}
-          onClick={() => onRun(t(k))}
-          className="rounded-full border border-transparent px-2 py-0.5 text-[13px]
-                     text-rw-t2 transition-colors duration-80 hover:border-rw-accent-bd
-                     hover:text-rw-t1 disabled:pointer-events-none"
-        >
-          {t(k)}
-        </button>
-      ))}
-      <span className="mx-1 h-4 w-px bg-rw-border" aria-hidden />
-      <input
-        value={customInstruction}
-        onChange={(e) => onCustomInstructionChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && active && customInstruction.trim()) {
-            onRun(customInstruction.trim());
-          }
-        }}
-        placeholder={t('writing.polish.customPlaceholder')}
-        disabled={!active}
-        className="min-w-[120px] flex-1 bg-transparent text-[13px] text-rw-t1
-                   outline-none placeholder:text-rw-t4"
-      />
-      <button
-        type="button"
-        disabled={!active || !customInstruction.trim()}
-        onClick={() => onRun(customInstruction.trim())}
-        className="rounded-full border border-rw-accent-bd px-2.5 py-0.5 text-[12px]
-                   text-rw-accent transition-colors duration-80 hover:bg-rw-accent-bg
-                   disabled:pointer-events-none disabled:opacity-50"
-      >
-        {t('writing.polish.run')}
-      </button>
-      <span className="text-[11px] text-rw-t4">
-        {t('writing.polish.refsLabel', { count: refCount })}
-      </span>
-    </div>
-  );
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   Diff card (mock3) — streamed text → word-level diff with per-hunk ✓/✗
-   ════════════════════════════════════════════════════════════════════ */
-
-function PolishDiffCard({
-  polish, onToggleHunk, onAcceptAll, onRejectAll, onRegenerate, onApply,
-}: {
-  polish: PolishState;
-  onToggleHunk: (changeIdx: number, accept: boolean) => void;
-  onAcceptAll: () => void;
-  onRejectAll: () => void;
-  onRegenerate: () => void;
-  onApply: () => void;
-}) {
-  const t = useT();
-  const streaming = polish.status === 'streaming';
-
-  // Render change hunks with a running index so ✓/✗ maps onto
-  // polish.accepted[changeIdx].
-  let changeIdx = -1;
-
-  return (
-    <div className="mt-4 shrink-0 rounded-md border border-rw-border bg-rw-bg-deep p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-rw-t4">
-          {t('writing.polish.cardTitle', { instruction: polish.instruction })}
-        </div>
-        {streaming && (
-          <div className="flex items-center gap-1.5 text-caption text-rw-t3">
-            <RefreshCw size={12} className="animate-spin" />
-            {t('writing.polish.streaming')}
-          </div>
-        )}
-      </div>
-
-      {streaming ? (
-        <div className="whitespace-pre-wrap text-[14px] leading-7 text-rw-t2">
-          {polish.streamText || '…'}
-        </div>
-      ) : (
-        <div className="whitespace-pre-wrap text-[14px] leading-7">
-          {(polish.segments ?? []).map((seg, i) => {
-            if (seg.kind === 'same') {
-              return <span key={i} className="text-rw-t2">{seg.text}</span>;
-            }
-            changeIdx += 1;
-            const idx = changeIdx;
-            const accepted = polish.accepted[idx] !== false;
-            return (
-              <span key={i} className="mx-0.5">
-                {seg.del && (
-                  <span
-                    className={cn(
-                      'rounded-sm px-0.5',
-                      accepted
-                        ? 'bg-rw-red-bg text-rw-red line-through'
-                        : 'text-rw-t1',
-                    )}
-                  >
-                    {seg.del}
-                  </span>
-                )}
-                {seg.add && (
-                  <span
-                    className={cn(
-                      'rounded-sm px-0.5',
-                      accepted
-                        ? 'bg-rw-green-bg text-rw-green'
-                        : 'text-rw-t4 line-through opacity-60',
-                    )}
-                  >
-                    {seg.add}
-                  </span>
-                )}
-                <span className="ml-0.5 inline-flex translate-y-[-1px] items-center gap-0.5 align-middle">
-                  <button
-                    type="button"
-                    title={t('writing.polish.acceptHunk')}
-                    onClick={() => onToggleHunk(idx, true)}
-                    className={cn(
-                      'inline-flex h-[18px] w-[18px] items-center justify-center rounded-sm border',
-                      accepted
-                        ? 'border-rw-green bg-rw-green-bg text-rw-green'
-                        : 'border-rw-border text-rw-t4 hover:text-rw-green',
-                    )}
-                  >
-                    <Check size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    title={t('writing.polish.rejectHunk')}
-                    onClick={() => onToggleHunk(idx, false)}
-                    className={cn(
-                      'inline-flex h-[18px] w-[18px] items-center justify-center rounded-sm border',
-                      !accepted
-                        ? 'border-rw-red bg-rw-red-bg text-rw-red'
-                        : 'border-rw-border text-rw-t4 hover:text-rw-red',
-                    )}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      )}
-
-      {/* provenance warning banner */}
-      {polish.warnings.length > 0 && (
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-rw-orange bg-rw-orange-bg px-3 py-2 text-caption text-rw-orange">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-          <span>
-            {t('writing.polish.provenance', { numbers: polish.warnings.join(' · ') })}
-          </span>
-        </div>
-      )}
-
-      {/* footer actions */}
-      {!streaming && (
-        <div className="mt-4 flex items-center gap-2 border-t border-rw-border pt-3">
-          <Button variant="rw-primary" onClick={onAcceptAll}>
-            <Check size={13} />
-            {t('writing.polish.acceptAll')}
-          </Button>
-          <Button variant="rw-secondary" onClick={onApply}>
-            {t('writing.polish.apply')}
-          </Button>
-          <Button variant="rw-secondary" onClick={onRejectAll}>
-            <X size={13} />
-            {t('writing.polish.rejectAll')}
-          </Button>
-          <Button variant="rw-secondary" onClick={onRegenerate}>
-            <RefreshCw size={13} />
-            {t('writing.polish.regen')}
-          </Button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ════════════════════════════════════════════════════════════════════
    Context drawer — 引用与快照. Compact collapsible strip at the top of
@@ -1749,11 +1437,15 @@ function ContextDrawer({
    ════════════════════════════════════════════════════════════════════ */
 
 function WritingChatPanel({
-  docId, streaming, onSend, onAtTyped, onUndoRevision,
+  docId, streaming, selQuote, onDismissQuote, onSend, onAtTyped,
+  onUndoRevision,
 }: {
   docId: string;
   streaming: boolean;
-  onSend: (text: string) => void;
+  /** Active canvas selection quote (chip above the composer). */
+  selQuote: SelectionQuote | null;
+  onDismissQuote: () => void;
+  onSend: (text: string, skills: string[]) => void;
   /** '@' typed into the composer → open the reference picker. */
   onAtTyped: () => void;
   onUndoRevision: (snapshotId: string) => void;
@@ -1765,6 +1457,10 @@ function WritingChatPanel({
   const snapshotByMsg = useAppState((s) => s.writingChatSnapshotByMsg);
   const draftText = useAppState((s) => s.drafts[chatDraftKey(docId)] ?? '');
   const setDraft = useAppState((s) => s.setDraft);
+
+  // F-skills — skills picked from the composer's "/" menu; applied to
+  // the next turn only, then cleared on send (same as EncounterMode).
+  const [skills, setSkills] = useState<string[]>([]);
 
   // History hydrate — once per doc (undefined = never loaded; a live
   // send marks the transcript loaded first, so we never clobber it).
@@ -1793,21 +1489,33 @@ function WritingChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId, loaded]);
 
-  // Keep the transcript pinned to the bottom as messages stream in.
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs]);
-
   const list = msgs ?? [];
+
+  // Keep the transcript pinned to the latest turn while streaming —
+  // but only when the medic is already near the bottom (same
+  // use-auto-scroll hook as EncounterMode).
+  const { containerRef, bottomRef, onScroll } = useAutoScroll(
+    [list.length, list[list.length - 1]?.text],
+  );
+
+  /** One send — forwards the picked skills and clears them (one-turn
+   *  application, same as the other composers). */
+  function doSend(text: string) {
+    if (streaming) return;
+    onSend(text, skills);
+    setSkills([]);
+  }
 
   return (
     <aside className="flex h-full w-[420px] shrink-0 flex-col border-r border-rw-border bg-rw-bg-deep">
       <div className="shrink-0 px-4 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-rw-t4">
         {t('writing.chat.title')}
       </div>
-      <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-3">
+      <div
+        ref={containerRef}
+        onScroll={onScroll}
+        className="flex-1 space-y-4 overflow-y-auto px-4 py-3"
+      >
         {loaded && list.length === 0 && (
           <div className="py-2 text-caption text-rw-t3">
             {t('writing.chat.empty')}
@@ -1850,6 +1558,9 @@ function WritingChatPanel({
             </MessageRow>
           );
         })}
+        {/* Auto-scroll anchor — useAutoScroll scrolls this into view
+            when new chunks land AND the medic is near the bottom. */}
+        <div ref={bottomRef} />
       </div>
       <div className="shrink-0 border-t border-rw-border px-3 py-3">
         <ChatComposer
@@ -1864,7 +1575,7 @@ function WritingChatPanel({
           }}
           onSend={() => {
             const v = draftText.trim();
-            if (v && !streaming) onSend(v);
+            if (v) doSend(v);
           }}
           disabled={streaming}
           sendDisabled={!draftText.trim()}
@@ -1872,16 +1583,85 @@ function WritingChatPanel({
           placeholder={t('writing.chat.placeholder')}
           error={error}
           onDismissError={() => setWritingChatError(docId, null)}
+          selectedSkills={skills}
+          onSkillsChange={setSkills}
+          above={selQuote ? (
+            <SelectionQuoteStrip
+              quote={selQuote}
+              streaming={streaming}
+              onDismiss={onDismissQuote}
+              onPreset={doSend}
+            />
+          ) : undefined}
         />
       </div>
     </aside>
   );
 }
 
+/** 选中内容 quote chip + rewrite preset chips — rendered above the
+ *  chat composer while a canvas selection is quoted. Dismissible ×;
+ *  the display truncates to ~80 chars (full text stays in state and
+ *  is embedded in the outgoing message). */
+function SelectionQuoteStrip({
+  quote, streaming, onDismiss, onPreset,
+}: {
+  quote: SelectionQuote;
+  streaming: boolean;
+  onDismiss: () => void;
+  onPreset: (instruction: string) => void;
+}) {
+  const t = useT();
+  const display = quote.text.length > 80
+    ? `${quote.text.slice(0, 80)}…`
+    : quote.text;
+  return (
+    <div className="mb-2">
+      <div className="flex items-start gap-2 rounded-md border border-rw-accent-bd bg-rw-accent-bg px-2.5 py-1.5">
+        <span className="shrink-0 text-[11px] font-medium text-rw-accent">
+          {t('writing.selection.quoteLabel')}
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate text-[12px] text-rw-t2"
+          title={quote.text}
+        >
+          {display}
+        </span>
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={t('writing.selection.dismiss')}
+          title={t('writing.selection.dismiss')}
+          className="shrink-0 rounded-sm p-0.5 text-rw-t3 transition-colors
+                     duration-80 hover:text-rw-t1"
+        >
+          <X size={12} />
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {POLISH_PRESET_KEYS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            disabled={streaming}
+            onClick={() => onPreset(t(k))}
+            className="rounded-full border border-rw-border px-2.5 py-0.5 text-[12px]
+                       text-rw-t2 transition-colors duration-80
+                       hover:border-rw-accent-bd hover:text-rw-t1
+                       disabled:pointer-events-none disabled:opacity-50"
+          >
+            {t(k)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ════════════════════════════════════════════════════════════════════
-   Read-only word diff — the revision modal body. Same visual language
-   as PolishDiffCard's segments, minus the per-hunk ✓/✗ (the revision
-   is already applied server-side; choices collapse to 保留/撤销).
+   Read-only word diff — the revision modal body. Word-level del/add
+   highlighting without per-hunk ✓/✗ (the revision is already applied
+   server-side; choices collapse to 保留/撤销).
    ════════════════════════════════════════════════════════════════════ */
 
 function ReadOnlyDiff({ segments }: { segments: DiffSegment[] }) {

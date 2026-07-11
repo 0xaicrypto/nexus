@@ -1,7 +1,7 @@
 {
   "name": "nexus-desktop-v2",
   "private": true,
-  "version": "0.1.12",
+  "version": "0.1.13",
   "type": "module",
   "description": "Nexus desktop — clinical workflow agent. Tauri 2.0 + React 18 + TypeScript. (The legacy Avalonia client lives at git tag legacy/avalonia-final.)",
   "scripts": {

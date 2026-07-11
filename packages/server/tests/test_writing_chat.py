@@ -14,6 +14,8 @@ directs. Covers:
       - <doc> tag split across stream chunk boundaries
       - provenance warning for numbers absent from context
       - LLM failure → error frame, user message still persisted
+      - F-skills: requested+enabled skill content injected into the
+        co-writing system prompt (skills_router.build_skills_block)
 """
 from __future__ import annotations
 
@@ -451,6 +453,79 @@ def test_chat_llm_failure_persists_user_message_no_doc_change(
     assert all(
         s["label"] != "对话修订前" for s in r.json()["snapshots"]
     )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# F-skills — "/" invocations ride into the co-writing system prompt
+# ─────────────────────────────────────────────────────────────────────
+
+SKILL_MARKER = "SKILLMARKER-WRITING-4242"
+SKILL_BODY = (
+    "---\n"
+    "name: haiku-mode\n"
+    "description: Answer in haiku form\n"
+    "---\n"
+    "\n"
+    f"When this skill is active, always respond in traditional haiku "
+    f"form (5-7-5 syllables). {SKILL_MARKER}\n"
+)
+
+
+def _install_skill(client, user, monkeypatch):
+    """Install a folder-layout skill without any network (same fake as
+    test_skills_router._patch_install)."""
+    from nexus_core.skills.manager import SkillManager
+
+    async def fake_install(self, source):
+        name = source.split(":")[-1].split("/")[-1]
+        d = self._skills_dir / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(SKILL_BODY, encoding="utf-8")
+        skill = self._load_skill_folder(d)
+        self._skills[skill.name] = skill
+        return skill
+
+    monkeypatch.setattr(SkillManager, "install", fake_install)
+    r = client.post("/api/v1/skills/install",
+                    json={"identifier": "anthropic:haiku-mode"},
+                    headers=_auth(user))
+    assert r.status_code == 200, r.text
+
+
+def test_chat_requested_enabled_skill_injected_into_prompt(
+    client, monkeypatch,
+):
+    user = _register(client, "alice")
+    doc = _create_doc(client, user)
+    _install_skill(client, user, monkeypatch)
+
+    mock = _mock_llm(monkeypatch, "好的，收到。")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat",
+        json={"message": "帮我起个标题", "skills": ["haiku-mode"]},
+        headers=_auth(user),
+    )
+    assert r.status_code == 200, r.text
+    frames = _sse_frames(r.text)
+    assert frames[-1]["type"] == "done"
+
+    # The enabled skill's instructions landed in the system prompt,
+    # alongside (not replacing) the co-writing contract.
+    args, _ = mock.call_args
+    system_prompt = args[1]
+    assert "## Skill: haiku-mode" in system_prompt
+    assert SKILL_MARKER in system_prompt
+    assert "ACTIVE SKILLS" in system_prompt
+    assert "<doc>" in system_prompt  # co-writing contract intact
+
+    # A turn WITHOUT the explicit invocation doesn't inject it.
+    mock2 = _mock_llm(monkeypatch, "好的。")
+    r = client.post(
+        f"/api/v1/docs/{doc['id']}/chat", json={"message": "再改一下"},
+        headers=_auth(user),
+    )
+    assert r.status_code == 200, r.text
+    assert SKILL_MARKER not in mock2.call_args[0][1]
 
 
 def test_chat_deleting_doc_clears_transcript(client, monkeypatch):

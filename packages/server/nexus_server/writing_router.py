@@ -197,6 +197,13 @@ class ChatRequest(BaseModel):
     # Optional subset of doc reference ids to inject as context; when
     # empty/omitted ALL of the doc's reference snapshots are injected.
     ref_ids: list[str] = []
+    # Explicit per-message skill invocation (the "/" menu in the
+    # composer). Each name must be an installed + enabled skill for
+    # this user — unknown / disabled names are silently dropped.
+    # Independent of this list, skills flagged auto_apply=1 in
+    # user_skill_prefs are injected on EVERY turn. Same contract as
+    # chat_router.ChatRequest; see skills_router.build_skills_block.
+    skills: list[str] = []
 
 
 class PhiScanRequest(BaseModel):
@@ -1299,6 +1306,24 @@ async def doc_chat(
         system_prompt += (
             "\n\n以下是本文档的引用数据（已脱敏），写作时只能使用这些"
             "数据中的数值：\n" + "\n---\n".join(snapshots)
+        )
+
+    # ── ACTIVE SKILLS ────────────────────────────────────────────────
+    # Same injection as chat_router: explicit "/" invocations from
+    # req.skills (installed+enabled only; others silently dropped) +
+    # every enabled auto_apply skill. Appended LAST so skill
+    # instructions can override tone/format defaults without touching
+    # the co-writing output contract above. Non-fatal on failure.
+    try:
+        from nexus_server.skills_router import build_skills_block
+        skills_block, _applied_skills = build_skills_block(
+            current_user, req.skills or [],
+        )
+        if skills_block:
+            system_prompt += "\n\n" + skills_block
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "doc chat: skills block build failed (non-fatal): %s", exc,
         )
 
     messages = history + [{"role": "user", "content": req.message}]

@@ -870,4 +870,7 @@ export const zh: Dict = {
   'writing.starter.t3':          '把要点扩写成段落',
   'writing.docs.collapse':       '收起文档栏',
   'writing.docs.expand':         '展开文档栏',
+  // 选中内容 → 写作对话引用条。
+  'writing.selection.quoteLabel': '选中内容',
+  'writing.selection.dismiss':   '清除选中引用',
 };

@@ -2256,59 +2256,11 @@ class _ApiClient {
     };
   }
 
-  /**
-   * POST /docs/{id}/polish — stream the revised selection. Same SSE
-   * frame parsing as ``sendChat`` above (``data: {...}\n\n``).
-   */
-  async *polishWritingDoc(
-    id: string,
-    input: { selection: string; instruction: string; refIds: string[] },
-    abortSignal?: AbortSignal,
-  ): AsyncIterable<WritingPolishFrame> {
-    const path = `/api/v1/docs/${encodeURIComponent(id)}/polish`;
-    const r = await fetch(`${baseUrl}${path}`, {
-      method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({
-        selection:   input.selection,
-        instruction: input.instruction,
-        ref_ids:     input.refIds,
-      }),
-      signal: abortSignal,
-    });
-    if (!r.ok || !r.body) {
-      throw new ApiError(r.status, await r.text().catch(() => r.statusText), path);
-    }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    if (abortSignal) {
-      abortSignal.addEventListener('abort', () => {
-        try { reader.cancel(); } catch { /* already cancelled */ }
-      }, { once: true });
-    }
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let idx: number;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const raw = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          for (const line of raw.split('\n')) {
-            if (line.startsWith('data: ')) {
-              try {
-                yield JSON.parse(line.slice(6)) as WritingPolishFrame;
-              } catch { /* malformed payload; skip */ }
-            }
-          }
-        }
-      }
-    } finally {
-      try { reader.releaseLock(); } catch { /* ok */ }
-    }
-  }
+  // NOTE: the standalone selection-polish flow was folded into the
+  // co-writing chat (selection quote chip → normal doc-chat turn), so
+  // the polishWritingDoc client method was removed. The server's
+  // POST /docs/{id}/polish endpoint still exists but is unused by the
+  // UI.
 
   /** POST /docs/{id}/phi-scan — rule+model PHI findings for the gate. */
   async phiScanWritingDoc(id: string): Promise<WritingPhiFinding[]> {
@@ -2376,7 +2328,7 @@ class _ApiClient {
 
   /**
    * POST /docs/{id}/chat — one co-writing turn. Streams SSE frames
-   * (``data: {...}\n\n`` — same parser as ``polishWritingDoc``):
+   * (``data: {...}\n\n`` — same parsing as ``sendChat``):
    * reply_chunk* → [doc_started → doc_chunk*] → [provenance_warning]
    * → done — or a terminal error frame (HTTP stays 200; the user
    * message is persisted server-side either way). A non-null
@@ -2386,7 +2338,7 @@ class _ApiClient {
    */
   async *chatWritingDoc(
     id: string,
-    input: { message: string; refIds?: string[] },
+    input: { message: string; refIds?: string[]; skills?: string[] },
     abortSignal?: AbortSignal,
   ): AsyncIterable<WritingChatFrame> {
     const path = `/api/v1/docs/${encodeURIComponent(id)}/chat`;
@@ -2396,6 +2348,10 @@ class _ApiClient {
       body: JSON.stringify({
         message: input.message,
         ...(input.refIds !== undefined ? { ref_ids: input.refIds } : {}),
+        // F-skills — explicit "/" invocations for this turn (same
+        // contract as the main chat endpoint).
+        ...(input.skills !== undefined && input.skills.length > 0
+          ? { skills: input.skills } : {}),
       }),
       signal: abortSignal,
     });
@@ -3256,13 +3212,6 @@ export interface WritingSnapshot {
   label: string;
   createdAt: string;
 }
-
-/** SSE frames streamed by POST /docs/{id}/polish. */
-export type WritingPolishFrame =
-  | { type: 'revised_chunk'; text: string }
-  | { type: 'provenance_warning'; numbers: string[] }
-  | { type: 'done'; revised: string }
-  | { type: 'error'; message: string };
 
 /** One PHI finding from POST /docs/{id}/phi-scan. ``start``/``end``
  *  are body offsets; ``suggestion`` is the proposed replacement. */

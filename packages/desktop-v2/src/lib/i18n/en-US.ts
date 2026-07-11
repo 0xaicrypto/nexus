@@ -855,6 +855,9 @@ export const en = {
   'writing.starter.t3':          'Expand my bullet points into paragraphs',
   'writing.docs.collapse':       'Collapse document list',
   'writing.docs.expand':         'Expand document list',
+  // Selection → chat quote (选中内容 chip above the writing composer).
+  'writing.selection.quoteLabel': 'Selected text',
+  'writing.selection.dismiss':   'Clear selection quote',
 };
 
 /** ``Dict`` is the contract every locale file must satisfy: same set
