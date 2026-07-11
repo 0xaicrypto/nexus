@@ -643,7 +643,8 @@ async def test_llm_key(_: str = Depends(get_current_user)):
         # Heuristic classification — the upstream SDK error text is
         # pretty consistent (we sampled gemini, openai, anthropic):
         if "api key not valid" in msg_lower or "api_key_invalid" in msg_lower \
-                or "invalid api key" in msg_lower or "incorrect api key" in msg_lower:
+                or "invalid api key" in msg_lower or "incorrect api key" in msg_lower \
+                or "invalid_authentication" in msg_lower or "401" in msg_lower:
             diag = "key_invalid"
         elif "quota" in msg_lower or "resource_exhausted" in msg_lower \
                 or "rate limit" in msg_lower or "429" in msg_lower:
