@@ -704,26 +704,50 @@ function LlmSettingsBody() {
         </h2>
         <Card>
           <div className="mb-3 flex gap-2">
-            {(['gemini', 'openai', 'anthropic', 'kimi'] as const).map((p) => (
-              <button
-                key={p}
-                onClick={() => {
-                  setProvider(p);
-                  if (!model || Object.values(DEFAULT_MODEL_FOR).includes(model)) {
-                    setModel(DEFAULT_MODEL_FOR[p]);
-                  }
-                }}
-                className={cn(
-                  'rounded-sm border px-3 py-1.5 text-caption capitalize',
-                  provider === p
-                    ? 'border-accent bg-accent-subtle text-accent'
-                    : 'border-border text-text-secondary hover:border-border-strong',
-                )}
-              >
-                {p}
-              </button>
-            ))}
+            {(['gemini', 'openai', 'anthropic', 'kimi'] as const).map((p) => {
+              const hasKey =
+                (p === 'gemini'    && status.hasGeminiKey)    ||
+                (p === 'openai'    && status.hasOpenaiKey)    ||
+                (p === 'anthropic' && status.hasAnthropicKey) ||
+                (p === 'kimi'      && status.hasKimiKey);
+              const isActive = status.provider === p;
+              return (
+                <button
+                  key={p}
+                  onClick={() => {
+                    setProvider(p);
+                    if (!model || Object.values(DEFAULT_MODEL_FOR).includes(model)) {
+                      setModel(DEFAULT_MODEL_FOR[p]);
+                    }
+                  }}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-sm border px-3 py-1.5 text-caption capitalize',
+                    provider === p
+                      ? 'border-accent bg-accent-subtle text-accent'
+                      : 'border-border text-text-secondary hover:border-border-strong',
+                  )}
+                  title={hasKey ? 'API key 已配置' : '未配置 API key'}
+                >
+                  {/* key-status dot: green = key on file, gray = not set */}
+                  <span
+                    className={cn(
+                      'inline-block h-1.5 w-1.5 rounded-full',
+                      hasKey ? 'bg-confirmed' : 'bg-border-strong',
+                    )}
+                  />
+                  {p}
+                  {isActive && (
+                    <span className="rounded-sm bg-confirmed/15 px-1 text-[10px] text-confirmed">
+                      使用中
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
+          <p className="mb-3 text-caption text-text-tertiary">
+            点击选择 provider（● 绿点 = key 已配置），修改后点击底部 <span className="font-medium text-text-secondary">Save</span> 生效——所有聊天与后台任务立即切换到所选模型。
+          </p>
           <label className="mb-1 block text-caption text-text-tertiary">Model</label>
           <Input
             value={model}
