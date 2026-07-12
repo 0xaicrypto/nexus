@@ -871,6 +871,8 @@ export const en = {
   // New keys go at the dict END.
   'skills.discover.offlineCatalog': 'Offline catalog',
   'skills.discover.installNetwork': 'GitHub is unreachable — set NEXUS_GITHUB_MIRROR in the settings .env, then retry.',
+  // Skill-pack install success toast (several skills in one go).
+  'skills.discover.installedPack': 'Installed {count} skills',
 };
 
 /** ``Dict`` is the contract every locale file must satisfy: same set

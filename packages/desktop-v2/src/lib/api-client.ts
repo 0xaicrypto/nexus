@@ -1994,11 +1994,24 @@ class _ApiClient {
   }
 
   /** POST /api/v1/skills/install — 409 ``already_installed`` when the
-   *  skill is already present (callers may treat that as success). */
+   *  skill is already present (callers may treat that as success).
+   *  Repo-root "skill pack" identifiers install several skills at
+   *  once: ``skills`` lists them all and ``count`` is its length;
+   *  ``skill`` stays the first entry for backward compatibility. */
   async installSkill(
     identifier: string,
-  ): Promise<{ ok: boolean; skill: { name: string; description: string } }> {
-    return this.fetch<{ ok: boolean; skill: { name: string; description: string } }>(
+  ): Promise<{
+    ok: boolean;
+    skill: { name: string; description: string };
+    skills?: { name: string; description: string }[];
+    count?: number;
+  }> {
+    return this.fetch<{
+      ok: boolean;
+      skill: { name: string; description: string };
+      skills?: { name: string; description: string }[];
+      count?: number;
+    }>(
       '/api/v1/skills/install',
       { method: 'POST', body: JSON.stringify({ identifier }) },
     );

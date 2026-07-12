@@ -65,13 +65,14 @@ def _err_code(r):
 
 
 def _patch_install(monkeypatch, body=SKILL_BODY):
-    """Replace SkillManager.install with a network-free fake that
-    materialises a folder-layout skill in the manager's skills dir."""
+    """Replace SkillManager.install_pack (the endpoint's entry point)
+    with a network-free fake that materialises a folder-layout skill
+    in the manager's skills dir."""
     from nexus_core.skills.manager import SkillManager
 
     calls: list[str] = []
 
-    async def fake_install(self, source):
+    async def fake_install_pack(self, source):
         calls.append(source)
         # Same name derivation the real installers use: last segment.
         name = source.split(":")[-1].split("/")[-1]
@@ -80,9 +81,9 @@ def _patch_install(monkeypatch, body=SKILL_BODY):
         (d / "SKILL.md").write_text(body, encoding="utf-8")
         skill = self._load_skill_folder(d)
         self._skills[skill.name] = skill
-        return skill
+        return [skill]
 
-    monkeypatch.setattr(SkillManager, "install", fake_install)
+    monkeypatch.setattr(SkillManager, "install_pack", fake_install_pack)
     return calls
 
 
@@ -178,6 +179,52 @@ def test_install_duplicate_409(client, monkeypatch):
     assert _err_code(r) == "already_installed"
 
 
+def test_install_pack_returns_count_and_all_names(client, monkeypatch):
+    """A repo-root 'skill pack' install returns every installed skill
+    (count + skills[]), keeps the backward-compat .skill first entry,
+    upserts a pref row for EACH skill, and dedupes by name."""
+    from nexus_core.skills.manager import SkillManager
+
+    names = ["paper-alpha", "paper-beta", "paper-gamma"]
+
+    async def fake_pack(self, source):
+        out = []
+        for n in names:
+            d = self._skills_dir / n
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "SKILL.md").write_text(
+                f"---\nname: {n}\ndescription: skill {n}\n---\n\nbody {n}\n",
+                encoding="utf-8",
+            )
+            skill = self._load_skill_folder(d)
+            self._skills[skill.name] = skill
+            out.append(skill)
+        # Duplicate entry — the endpoint must dedupe by name, not 409.
+        return out + [out[0]]
+
+    monkeypatch.setattr(SkillManager, "install_pack", fake_pack)
+    user = _register(client, "alice")
+    r = client.post("/api/v1/skills/install",
+                    json={"identifier": "https://github.com/x/pack-repo"},
+                    headers=_auth(user))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["ok"] is True
+    assert body["count"] == 3
+    assert [s["name"] for s in body["skills"]] == names
+    # Backward-compat single-skill key = first installed.
+    assert body["skill"]["name"] == names[0]
+
+    # Prefs upserted for each skill → list shows all three enabled.
+    rows = client.get("/api/v1/skills", headers=_auth(user)).json()["skills"]
+    by_name = {x["name"]: x for x in rows}
+    assert set(by_name) == set(names)
+    for n in names:
+        assert by_name[n]["enabled"] is True
+        assert by_name[n]["source"] == "github"
+        assert by_name[n]["installed_at"]
+
+
 def test_install_empty_identifier_422(client):
     user = _register(client, "alice")
     r = client.post("/api/v1/skills/install",
@@ -192,7 +239,7 @@ def test_install_value_error_maps_to_422(client, monkeypatch):
     async def bad_install(self, source):
         raise ValueError(f"Cannot parse GitHub URL: {source}")
 
-    monkeypatch.setattr(SkillManager, "install", bad_install)
+    monkeypatch.setattr(SkillManager, "install_pack", bad_install)
     user = _register(client, "alice")
     r = client.post("/api/v1/skills/install",
                     json={"identifier": "https://github.com/x"},
@@ -423,7 +470,7 @@ def test_install_network_failure_maps_to_install_network(
     async def net_boom(self, source):
         raise OSError("Tunnel connection failed: 403 Forbidden")
 
-    monkeypatch.setattr(SkillManager, "install", net_boom)
+    monkeypatch.setattr(SkillManager, "install_pack", net_boom)
     user = _register(client, "alice")
     r = client.post("/api/v1/skills/install",
                     json={"identifier": "anthropic:pdf"},
@@ -446,7 +493,7 @@ def test_install_non_network_failure_stays_install_failed(
             "x/y is a multi-skill repo with 3 skills: a, b, c. Pick one."
         )
 
-    monkeypatch.setattr(SkillManager, "install", boom)
+    monkeypatch.setattr(SkillManager, "install_pack", boom)
     user = _register(client, "alice")
     r = client.post("/api/v1/skills/install",
                     json={"identifier": "x/y"}, headers=_auth(user))

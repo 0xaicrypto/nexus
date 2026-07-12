@@ -885,4 +885,6 @@ export const zh: Dict = {
   // 技能发现 — 离线目录回退 + GitHub 镜像提示。新键统一追加在字典末尾。
   'skills.discover.offlineCatalog': '离线目录',
   'skills.discover.installNetwork': 'GitHub 无法访问——请在设置的 .env 中配置 NEXUS_GITHUB_MIRROR 镜像后重试',
+  // 技能包安装成功提示（一次装入多个技能时的 toast）。
+  'skills.discover.installedPack': '已安装 {count} 个技能',
 };

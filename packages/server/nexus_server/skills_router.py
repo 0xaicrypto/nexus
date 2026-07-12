@@ -567,7 +567,11 @@ async def install_skill(
         )
 
     try:
-        skill = await mgr.install(identifier)
+        # install_pack handles every identifier shape install() does;
+        # for repo-ROOT URLs ("skill pack" repos from the github-topic
+        # search) it installs EVERY discovered skill dir instead of
+        # bailing with a "multi-skill repo, pick one" error.
+        skills = await mgr.install_pack(identifier)
     except HTTPException:
         raise
     except ValueError as e:
@@ -592,6 +596,26 @@ async def install_skill(
             detail={"code": "install_failed", "message": str(e)[:300]},
         )
 
+    if not skills:
+        # install_pack raises rather than returning [] — defensive.
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "install_failed",
+                    "message": "installer returned no skills"},
+        )
+
+    # Dedupe by skill name — a pack repo can resolve two dirs to the
+    # same frontmatter name (or re-install an already-present skill);
+    # neither is an error for pack installs, the last write wins on
+    # disk and we report the name once.
+    unique: list = []
+    seen: set[str] = set()
+    for s in skills:
+        if s.name in seen:
+            continue
+        seen.add(s.name)
+        unique.append(s)
+
     if identifier.startswith("anthropic:") or "github.com/anthropics/" in identifier:
         src = "official"
     elif "github.com" in identifier or "/" in identifier:
@@ -599,14 +623,21 @@ async def install_skill(
     else:
         src = "official"  # bare names resolve against anthropics/skills
     with get_db_connection() as conn:
-        _upsert_pref(conn, current_user, skill.name,
-                     enabled=True, source=src)
+        for s in unique:
+            _upsert_pref(conn, current_user, s.name,
+                         enabled=True, source=src)
 
-    # A resident twin picks the new skill up immediately (legacy path).
-    _sync_live_twin(current_user, skill.name, enabled=True)
+    # A resident twin picks the new skills up immediately (legacy path).
+    for s in unique:
+        _sync_live_twin(current_user, s.name, enabled=True)
 
+    payload = [{"name": s.name, "description": s.description}
+               for s in unique]
     return {"ok": True,
-            "skill": {"name": skill.name, "description": skill.description}}
+            "skills": payload,
+            "count": len(payload),
+            # Backward-compat: single-skill callers keep reading .skill.
+            "skill": payload[0]}
 
 
 @router.delete("/{name}")

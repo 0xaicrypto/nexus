@@ -476,16 +476,16 @@ def _install_skill(client, user, monkeypatch):
     test_skills_router._patch_install)."""
     from nexus_core.skills.manager import SkillManager
 
-    async def fake_install(self, source):
+    async def fake_install_pack(self, source):
         name = source.split(":")[-1].split("/")[-1]
         d = self._skills_dir / name
         d.mkdir(parents=True, exist_ok=True)
         (d / "SKILL.md").write_text(SKILL_BODY, encoding="utf-8")
         skill = self._load_skill_folder(d)
         self._skills[skill.name] = skill
-        return skill
+        return [skill]
 
-    monkeypatch.setattr(SkillManager, "install", fake_install)
+    monkeypatch.setattr(SkillManager, "install_pack", fake_install_pack)
     r = client.post("/api/v1/skills/install",
                     json={"identifier": "anthropic:haiku-mode"},
                     headers=_auth(user))

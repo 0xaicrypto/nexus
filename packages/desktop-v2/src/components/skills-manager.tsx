@@ -256,6 +256,7 @@ function SkillSwitch({
 function DiscoverTab() {
   const t = useT();
   const refreshSkills = useAppState((s) => s.refreshSkills);
+  const showToast = useAppState((s) => s.showToast);
   const [q, setQ]           = useState('');
   const [source, setSource] = useState<SourceFilter>(null);
   const [results, setResults]     = useState<SkillSearchResult[]>([]);
@@ -314,8 +315,16 @@ function DiscoverTab() {
     setInstalling((prev) => new Set(prev).add(r.identifier));
     setError(null);
     try {
-      await api.installSkill(r.identifier);
+      const res = await api.installSkill(r.identifier);
       setJustInstalled((prev) => new Set(prev).add(r.identifier));
+      // Repo-root "skill pack" installs bring in several skills at
+      // once — surface how many actually landed.
+      if ((res.count ?? 1) > 1) {
+        showToast(
+          t('skills.discover.installedPack', { count: String(res.count) }),
+          'success',
+        );
+      }
       await refreshSkills();
     } catch (e) {
       if (e instanceof ApiError && e.code === 'already_installed') {

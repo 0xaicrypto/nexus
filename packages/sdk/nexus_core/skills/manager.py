@@ -301,6 +301,10 @@ class SkillManager:
         self._skills_dir = self._base_dir / "skills"
         self._skills_dir.mkdir(parents=True, exist_ok=True)
         self._skills: dict[str, InstalledSkill] = {}
+        # "org/repo" -> default branch name, resolved via the GitHub
+        # repos API. Instance-level so tests with a monkeypatched HTTP
+        # layer never see another instance's stale entries.
+        self._default_branch_cache: dict[str, str] = {}
 
         # Auto-load existing installed skills
         self._load_all()
@@ -486,31 +490,97 @@ class SkillManager:
             source: GitHub URL, anthropic: shortcut, or bare skill name.
 
         Returns:
-            The installed skill.
+            The installed skill. For repo-ROOT URLs that resolve to
+            multiple candidate skill directories this raises a
+            descriptive error listing the choices — callers that want
+            everything should use :meth:`install_pack` instead.
         """
-        # Full GitHub URL — pass straight through
-        if "github.com" in source:
-            return await self._install_from_github(source)
+        return await self._install_from_github(self._normalize_source(source))
 
+    @staticmethod
+    def _normalize_source(source: str) -> str:
+        """Map every supported install identifier shape onto a full
+        GitHub URL (shared by :meth:`install` + :meth:`install_pack`).
+
+          - Full GitHub URL      → passed through unchanged.
+          - 'anthropic:<name>'   → canonical anthropics/skills tree URL.
+          - 'org/repo[/...]'     → https://github.com/org/repo[/...].
+          - bare name ('pdf')    → anthropics/skills/tree/main/skills/<name>.
+        """
+        if "github.com" in source:
+            return source
         # Anthropic official skills repo shortcut. anthropics/skills
         # hosts pdf, docx, xlsx, pptx, mcp-builder, skill-creator and
         # friends — the canonical reference set.
         if source.startswith("anthropic:"):
             name = source[len("anthropic:"):]
-            return await self._install_from_github(
-                f"https://github.com/anthropics/skills/tree/main/skills/{name}"
-            )
-
+            return f"https://github.com/anthropics/skills/tree/main/skills/{name}"
         # GitHub-style path (org/repo/...)
         if "/" in source and not source.startswith("/"):
-            return await self._install_from_github(f"https://github.com/{source}")
-
+            return f"https://github.com/{source}"
         # Default: bare skill name → try Anthropic skills hub.
-        # _install_from_github will walk the repo and surface a clean
-        # error if no matching skill is found.
-        return await self._install_from_github(
-            f"https://github.com/anthropics/skills/tree/main/skills/{source}"
-        )
+        return f"https://github.com/anthropics/skills/tree/main/skills/{source}"
+
+    async def install_pack(self, source: str) -> list[InstalledSkill]:
+        """Install every skill a source resolves to.
+
+        Same identifier shapes as :meth:`install`. Behaviour split:
+
+          * URL with a specific path (``.../tree/<branch>/<dir>``,
+            ``org/repo/skills/pdf``, ``anthropic:pdf``, bare names) —
+            installs exactly that one skill; returns ``[skill]``.
+          * Repo-ROOT URL (the github-topic search shape) — discovers
+            EVERY skill directory in the repo (root SKILL.md, top-level
+            ``<dir>/SKILL.md`` "skill pack" layout, and the classic
+            ``skills/<name>/SKILL.md`` convention) and installs each
+            one sequentially. Individual failures are collected and
+            skipped; raises only when ZERO skills installed, with an
+            aggregate error message.
+
+        Returns the list of installed skills (deduped by skill name).
+        """
+        url = self._normalize_source(source)
+        org, repo, branch, path = self._parse_github_url(url)
+        if branch is None:
+            branch = await self._resolve_default_branch(org, repo)
+
+        if path:
+            # Specific-path URL — behaves exactly like install().
+            return [await self._install_dir(org, repo, branch, path)]
+
+        found = await self._discover_skill_dirs(org, repo, branch)
+        if not found:
+            raise RuntimeError(
+                f"{org}/{repo} contains no skills — no SKILL.md at the "
+                f"repo root, in any top-level directory, or under a "
+                f"skills/ subfolder. Please verify the URL."
+            )
+
+        installed: list[InstalledSkill] = []
+        seen: set[str] = set()
+        errors: list[str] = []
+        for p in found:
+            try:
+                skill = await self._install_dir(org, repo, branch, p)
+            except Exception as e:  # noqa: BLE001 — keep going, aggregate
+                logger.warning(
+                    "install_pack: skill dir %r in %s/%s failed: %s",
+                    p or "(root)", org, repo, e,
+                )
+                errors.append(f"{p or '(root)'}: {e}")
+                continue
+            if skill.name in seen:
+                continue
+            seen.add(skill.name)
+            installed.append(skill)
+
+        if not installed:
+            raise RuntimeError(
+                f"Installing skill pack {org}/{repo} failed — none of the "
+                f"{len(found)} skill dir(s) could be installed: "
+                + "; ".join(errors[:5])
+            )
+        return installed
 
     async def search_anthropic_official(
         self, query: str, limit: int = 10,
@@ -918,114 +988,293 @@ class SkillManager:
         logger.info("Installed LobeHub skill: %s (%s)", skill.name, skill.title)
         return skill
 
-    async def _install_from_github(self, url: str) -> InstalledSkill:
-        """Download a skill folder from GitHub."""
-        # Parse URL: https://github.com/org/repo/tree/branch/path/to/skill
+    @staticmethod
+    def _parse_github_url(url: str) -> tuple[str, str, Optional[str], str]:
+        """Parse a GitHub URL into ``(org, repo, branch, path)``.
+
+        ``branch`` is None when the URL carried no explicit
+        ``/tree/<branch>/`` segment — the caller must resolve the
+        repo's actual default branch (NOT assume 'main'; plenty of
+        community skill repos still ship 'master' or a custom default).
+        ``path`` is '' for repo-root URLs.
+        """
         match = re.match(
-            r"https?://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/(.+)",
+            r"https?://github\.com/([^/]+)/([^/]+)/tree/([^/]+)/?(.*)$",
+            url,
+        )
+        if match:
+            org, repo, branch, path = match.groups()
+            return org, repo, branch, path.rstrip("/")
+        match = re.match(
+            r"https?://github\.com/([^/]+)/([^/]+)/?(.*)$",
             url,
         )
         if not match:
-            # Try without /tree/branch/
-            match = re.match(
-                r"https?://github\.com/([^/]+)/([^/]+)/?(.*)$",
-                url,
-            )
-            if not match:
-                raise ValueError(f"Cannot parse GitHub URL: {url}")
-            org, repo, path = match.group(1), match.group(2), match.group(3)
-            branch = "main"
-        else:
-            org, repo, branch, path = match.groups()
+            raise ValueError(f"Cannot parse GitHub URL: {url}")
+        org, repo, path = match.groups()
+        return org, repo, None, path.rstrip("/")
 
-        # ── Multi-skill repo handling (Phase Q follow-up) ────────────
-        # When the URL points at the repo root (path is empty) — common
-        # for github-topic search hits — we need to figure out where
-        # the SKILL.md actually lives. Three conventions:
-        #   * Single-skill repo: SKILL.md at root.
-        #   * Multi-skill repo:  skills/<name>/SKILL.md (Anthropic +
-        #     Gemini convention) — pick the only one if there's just
-        #     one, else surface a clear error listing the choices so
-        #     the LLM can re-ask the user.
-        #   * Other layouts: error out, ask for an explicit path.
-        if path.rstrip("/") == "":
-            # Probe root for SKILL.md first.
-            root_check = (
-                f"https://raw.githubusercontent.com/{org}/{repo}/{branch}/SKILL.md"
+    async def _resolve_default_branch(self, org: str, repo: str) -> str:
+        """Resolve a repo's default branch via the GitHub repos API.
+
+        Falls back to 'main' on any failure (network, rate-limit,
+        unexpected payload). Cached per (org, repo) in-process — one
+        API call per repo per manager instance.
+        """
+        key = f"{org}/{repo}"
+        cached = self._default_branch_cache.get(key)
+        if cached:
+            return cached
+        branch = "main"
+        try:
+            info = await asyncio.to_thread(
+                self._http_get_json,
+                f"https://api.github.com/repos/{org}/{repo}",
+            )
+            if isinstance(info, dict) and info.get("default_branch"):
+                branch = str(info["default_branch"])
+        except Exception as e:  # noqa: BLE001 — 'main' fallback
+            logger.debug(
+                "default-branch lookup failed for %s: %s (assuming 'main')",
+                key, e,
+            )
+        self._default_branch_cache[key] = branch
+        return branch
+
+    # Top-level directory names that are never skill dirs — skipped
+    # during repo-root discovery so we don't waste SKILL.md probes on
+    # docs/tests/assets folders in community "skill pack" repos.
+    _NON_SKILL_DIRS = frozenset({
+        "docs", "doc", "test", "tests", "assets", "images",
+        "scripts", "template", "spec", ".github",
+    })
+
+    # Cap on how many candidate dirs get a SKILL.md probe — keeps a
+    # huge monorepo from turning discovery into hundreds of fetches.
+    _DISCOVERY_CAP = 20
+
+    async def _discover_skill_dirs(
+        self, org: str, repo: str, branch: str,
+    ) -> list[str]:
+        """Find every skill directory in a repo (paths relative to root).
+
+        Handles the three layouts seen in the wild:
+          a. Single-skill repo — SKILL.md at the repo root → ``['']``.
+          b. "Skill pack" repo — MULTIPLE top-level dirs, each with its
+             own SKILL.md (common for github-topic search hits like
+             ``Lambenthan/paper-discipline-skills``).
+          c. Classic ``skills/<name>/SKILL.md`` convention (Anthropic /
+             Gemini style) → ``'skills/<name>'`` entries.
+
+        b and c can coexist; results are concatenated. Non-skill dirs
+        (docs, tests, assets, dotdirs, …) are skipped and probing is
+        capped at :data:`_DISCOVERY_CAP` per level.
+        """
+        raw_root = f"https://raw.githubusercontent.com/{org}/{repo}/{branch}"
+
+        async def _has_skill_md(rel: str) -> bool:
+            probe = f"{raw_root}/{rel}/SKILL.md" if rel else f"{raw_root}/SKILL.md"
+            try:
+                await asyncio.to_thread(self._http_get_text, probe)
+                return True
+            except Exception:  # noqa: BLE001 — 404 / network = "no"
+                return False
+
+        # a. Root SKILL.md → single root-level skill.
+        if await _has_skill_md(""):
+            return [""]
+
+        # b. List the repo ROOT and probe candidate top-level dirs.
+        listing_url = (
+            f"https://api.github.com/repos/{org}/{repo}/contents?ref={branch}"
+        )
+        try:
+            listing = await asyncio.to_thread(self._http_get_json, listing_url)
+        except Exception as e:
+            raise RuntimeError(
+                f"Can't list the contents of {org}/{repo}@{branch} ({e}). "
+                f"Please pass a more specific URL like "
+                f"https://github.com/{org}/{repo}/tree/{branch}/<skill-dir>."
+            )
+        if not isinstance(listing, list):
+            listing = []
+        root_dirs = [
+            str(it.get("name") or "")
+            for it in listing
+            if it.get("type") == "dir" and it.get("name")
+        ]
+
+        found: list[str] = []
+        candidates = [
+            d for d in root_dirs
+            if not d.startswith(".")
+            and d.lower() not in self._NON_SKILL_DIRS
+            and d != "skills"  # handled explicitly below
+        ]
+        for d in candidates[:self._DISCOVERY_CAP]:
+            if await _has_skill_md(d):
+                found.append(d)
+
+        # c. Classic skills/ subfolder — probe each child dir too.
+        if "skills" in root_dirs:
+            sub_url = (
+                f"https://api.github.com/repos/{org}/{repo}"
+                f"/contents/skills?ref={branch}"
             )
             try:
-                # HEAD via urlopen — cheaper than GET if the file exists.
-                await asyncio.to_thread(self._http_get_text, root_check)
-                # Found at root — keep path="" so the existing logic
-                # downloads from {raw_base}/SKILL.md.
-            except Exception:
-                # Not at root — list /skills/ via the contents API.
-                listing_url = (
-                    f"https://api.github.com/repos/{org}/{repo}"
-                    f"/contents/skills?ref={branch}"
-                )
-                try:
-                    listing = await asyncio.to_thread(
-                        self._http_get_json, listing_url,
-                    )
-                except Exception as e:
-                    raise RuntimeError(
-                        f"This URL points to a multi-skill repo "
-                        f"({org}/{repo}) but I can't list its skills/ "
-                        f"folder ({e}). Please pass a more specific URL "
-                        f"like https://github.com/{org}/{repo}/tree/{branch}/skills/<name>."
-                    )
-                names = (
-                    [it.get("name", "") for it in listing if it.get("type") == "dir"]
-                    if isinstance(listing, list) else []
-                )
-                if not names:
-                    raise RuntimeError(
-                        f"{org}/{repo} has no SKILL.md at root and no "
-                        f"skills/ subfolder. Not a recognised skill repo "
-                        f"layout — please verify the URL."
-                    )
-                if len(names) == 1:
-                    path = f"skills/{names[0]}"
-                    logger.info(
-                        "Multi-skill repo %s/%s has one skill: %s",
-                        org, repo, names[0],
-                    )
-                else:
-                    raise RuntimeError(
-                        f"{org}/{repo} is a multi-skill repo with "
-                        f"{len(names)} skills: {', '.join(names[:10])}"
-                        f"{', …' if len(names) > 10 else ''}. "
-                        f"Pick one and pass identifier="
-                        f"'https://github.com/{org}/{repo}/tree/{branch}/"
-                        f"skills/<name>'."
-                    )
+                sub = await asyncio.to_thread(self._http_get_json, sub_url)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("skills/ listing failed for %s/%s: %s",
+                             org, repo, e)
+                sub = []
+            if isinstance(sub, list):
+                subdirs = [
+                    str(it.get("name") or "")
+                    for it in sub
+                    if it.get("type") == "dir" and it.get("name")
+                    and not str(it.get("name")).startswith(".")
+                ]
+                for d in subdirs[:self._DISCOVERY_CAP]:
+                    if await _has_skill_md(f"skills/{d}"):
+                        found.append(f"skills/{d}")
 
-        # Derive skill name from path
-        skill_name = path.rstrip("/").split("/")[-1]
-        if not skill_name:
-            raise RuntimeError(
-                f"Could not derive a skill name from URL {url}. "
-                f"Pass a URL ending in the skill folder name."
-            )
+        return found
+
+    async def _install_from_github(self, url: str) -> InstalledSkill:
+        """Download a single skill folder from GitHub.
+
+        Repo-ROOT URLs (no path — the github-topic search shape) go
+        through :meth:`_discover_skill_dirs`; exactly one discovered
+        skill installs directly, multiple raise a descriptive error
+        listing the choices (use :meth:`install_pack` to grab them all).
+        """
+        org, repo, branch, path = self._parse_github_url(url)
+        if branch is None:
+            # No explicit /tree/<branch>/ — never hardcode 'main';
+            # community repos frequently default to 'master' etc.
+            branch = await self._resolve_default_branch(org, repo)
+
+        if path == "":
+            found = await self._discover_skill_dirs(org, repo, branch)
+            if not found:
+                raise RuntimeError(
+                    f"{org}/{repo} has no SKILL.md at root, in any "
+                    f"top-level directory, or under a skills/ subfolder. "
+                    f"Not a recognised skill repo layout — please verify "
+                    f"the URL."
+                )
+            if len(found) == 1:
+                path = found[0]
+                logger.info(
+                    "Repo %s/%s resolved to one skill dir: %s",
+                    org, repo, path or "(root)",
+                )
+            else:
+                choices = [p or "(root)" for p in found]
+                raise RuntimeError(
+                    f"{org}/{repo} is a multi-skill repo with "
+                    f"{len(found)} skills: {', '.join(choices[:10])}"
+                    f"{', …' if len(found) > 10 else ''}. "
+                    f"Pick one and pass identifier="
+                    f"'https://github.com/{org}/{repo}/tree/{branch}/"
+                    f"<dir>' — or install them all at once via "
+                    f"install_pack."
+                )
+
+        return await self._install_dir(org, repo, branch, path)
+
+    # Files larger than this are skipped during skill-dir download —
+    # scripts/assets referenced by SKILL.md are typically tiny; big
+    # binaries would bloat the skills dir and slow installs.
+    _MAX_SKILL_FILE_BYTES = 2 * 1024 * 1024  # 2 MB
+
+    async def _install_dir(
+        self, org: str, repo: str, branch: str, path: str,
+    ) -> InstalledSkill:
+        """Download ONE skill directory from GitHub into the skills dir.
+
+        Shared by :meth:`_install_from_github` (single install) and
+        :meth:`install_pack` (bulk). Downloads:
+          * ``SKILL.md`` (required — failure aborts this dir),
+          * every other top-level FILE in the dir via the contents API
+            (scripts / assets referenced by SKILL.md; entries larger
+            than :data:`_MAX_SKILL_FILE_BYTES` are skipped),
+          * ``references/*.md`` (legacy behaviour, kept).
+
+        ``path`` is the skill dir relative to the repo root; '' means
+        the skill lives AT the root (skill name falls back to the repo
+        name).
+        """
+        path = (path or "").strip("/")
+        skill_name = path.split("/")[-1] if path else repo
         dest = self._skills_dir / skill_name
 
-        # Clone just the skill directory using git sparse-checkout
-        logger.info("Installing skill '%s' from %s/%s...", skill_name, org, repo)
+        logger.info(
+            "Installing skill '%s' from %s/%s@%s (%s)...",
+            skill_name, org, repo, branch, path or "repo root",
+        )
 
-        # Use degit-style: download the folder via GitHub API
-        raw_base = f"https://raw.githubusercontent.com/{org}/{repo}/{branch}/{path}"
+        raw_base = (
+            f"https://raw.githubusercontent.com/{org}/{repo}/{branch}"
+            + (f"/{path}" if path else "")
+        )
 
-        # Download SKILL.md first
+        # Download SKILL.md first — the one required artifact.
         dest.mkdir(parents=True, exist_ok=True)
         await self._download_file(f"{raw_base}/SKILL.md", dest / "SKILL.md")
+
+        # Download every other top-level FILE in the skill dir so
+        # scripts / assets referenced by SKILL.md come along. Failures
+        # here are non-fatal — the skill still works from SKILL.md.
+        contents_seg = f"contents/{path}" if path else "contents"
+        dir_url = (
+            f"https://api.github.com/repos/{org}/{repo}/{contents_seg}"
+            f"?ref={branch}"
+        )
+        try:
+            entries = await asyncio.to_thread(self._http_get_json, dir_url)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("skill dir listing failed (%s): %s", dir_url, e)
+            entries = []
+        if isinstance(entries, list):
+            for item in entries:
+                if item.get("type") != "file":
+                    continue
+                fname = str(item.get("name") or "")
+                # SKILL.md is already down; reject anything that could
+                # escape the dest dir (defensive — the API never
+                # returns slashes in ``name``).
+                if not fname or fname == "SKILL.md" or "/" in fname or "\\" in fname:
+                    continue
+                try:
+                    size = int(item.get("size") or 0)
+                except (TypeError, ValueError):
+                    size = 0
+                if size > self._MAX_SKILL_FILE_BYTES:
+                    logger.info(
+                        "Skipping %s/%s (%d bytes > %d limit)",
+                        skill_name, fname, size, self._MAX_SKILL_FILE_BYTES,
+                    )
+                    continue
+                dl_url = item.get("download_url")
+                if not dl_url:
+                    continue
+                try:
+                    await self._download_file(dl_url, dest / fname)
+                except Exception as e:  # noqa: BLE001 — optional file
+                    logger.debug("optional skill file %s failed: %s",
+                                 fname, e)
 
         # Try to download common reference files
         refs_dir = dest / "references"
         refs_dir.mkdir(exist_ok=True)
 
         # Fetch directory listing via GitHub API to find reference files
-        api_url = f"https://api.github.com/repos/{org}/{repo}/contents/{path}/references?ref={branch}"
+        refs_seg = f"contents/{path}/references" if path else "contents/references"
+        api_url = (
+            f"https://api.github.com/repos/{org}/{repo}/{refs_seg}"
+            f"?ref={branch}"
+        )
         try:
             result = await asyncio.to_thread(
                 self._http_get_json, api_url
