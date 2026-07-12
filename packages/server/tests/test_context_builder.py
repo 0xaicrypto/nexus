@@ -205,9 +205,12 @@ def test_memory_truncated_tail_first_as_last_resort():
     assert bundle.token_estimate <= 360
 
 
-def test_memory_layer_fraction_cap_applies_upfront():
-    # Default budget 32k → M cap = 4800 tokens. A 10k-token memory
-    # must come back capped even with no overall budget pressure.
+def test_memory_layer_fraction_cap_applies_upfront(monkeypatch):
+    # Pin the budget (defaults are now model-aware, so the test must
+    # not depend on whatever DEFAULT_LLM_MODEL the test env carries).
+    # 32k budget → M cap = 4800 tokens. A 10k-token memory must come
+    # back capped even with no overall budget pressure.
+    monkeypatch.setenv("NEXUS_CONTEXT_BUDGET", "32000")
     memory = "MEMHEAD-" + "m" * 35_000 + "-MEMTAIL"
     bundle = cb.build(
         system_text="SYS",
