@@ -87,6 +87,35 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BUDGET_TOKENS = 32_000
 
+#: Model-aware default budgets. Matched by substring against the
+#: active DEFAULT_LLM_MODEL (first hit wins, ordered most-specific
+#: first). Budgets are deliberately far below each model's context
+#: window: the window is a ceiling for rare large payloads, the budget
+#: is per-turn discipline (cost: input tokens bill every turn; latency:
+#: prefill scales with input; quality: retrieval beats needle-in-a-
+#: haystack). Larger windows earn proportionally larger budgets, not
+#: window-sized ones. NEXUS_CONTEXT_BUDGET env always overrides.
+MODEL_BUDGET_TABLE: list[tuple[str, int]] = [
+    ("kimi-k2.7", 64_000),      # 256K window
+    ("kimi-k2.6", 64_000),      # 256K window
+    ("kimi", 48_000),           # other kimi models (128K+)
+    ("gemini-2.5", 64_000),     # 1M window
+    ("gemini", 48_000),
+    ("claude", 64_000),         # 200K window
+    ("gpt-4o", 40_000),         # 128K window
+    ("gpt", 40_000),
+]
+
+
+def _budget_for_model(model: str | None) -> int:
+    """Model-aware default budget (substring match, first hit wins)."""
+    if model:
+        m = model.lower()
+        for needle, budget in MODEL_BUDGET_TABLE:
+            if needle in m:
+                return budget
+    return DEFAULT_BUDGET_TOKENS
+
 #: Layer fractions of the overall budget. ``reserve`` is head-room that
 #: is never allocated (trim target = budget * (1 - reserve)).
 BUDGETS = {
@@ -124,6 +153,9 @@ SUMMARY_MAX_FETCH = 400
 
 
 def _budget_from_env() -> int:
+    """Resolve the effective budget: NEXUS_CONTEXT_BUDGET env wins;
+    otherwise a model-aware default from MODEL_BUDGET_TABLE based on
+    the active DEFAULT_LLM_MODEL; otherwise DEFAULT_BUDGET_TOKENS."""
     raw = os.environ.get("NEXUS_CONTEXT_BUDGET", "")
     try:
         v = int(raw)
@@ -131,7 +163,11 @@ def _budget_from_env() -> int:
             return v
     except (TypeError, ValueError):
         pass
-    return DEFAULT_BUDGET_TOKENS
+    try:
+        from nexus_server.config import get_config
+        return _budget_for_model(get_config().DEFAULT_LLM_MODEL)
+    except Exception:  # noqa: BLE001 — config unavailable in some tests
+        return DEFAULT_BUDGET_TOKENS
 
 
 # ─────────────────────────────────────────────────────────────────────
