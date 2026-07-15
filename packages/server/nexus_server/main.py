@@ -689,6 +689,18 @@ def create_app() -> FastAPI:
             "git_sha":    GIT_SHA,
         }
 
+    # Public runtime config for the web UI. Contains only safe, non-secret
+    # metadata so the frontend can adapt branding and feature gates.
+    @app.get("/api/v1/config", tags=["health"])
+    async def public_config():
+        return {
+            "app_name":             "Nexus",
+            "api_version":          config.API_VERSION,
+            "min_client_api_version": config.MIN_CLIENT_API_VERSION,
+            "default_provider":     config.DEFAULT_LLM_PROVIDER,
+            "billing_enabled":      config.billing_enabled,
+        }
+
     # Include routers with API prefixes
     app.include_router(auth.router)
     # Admin console — user list / disable / enable / reset-password.
@@ -846,6 +858,33 @@ def create_app() -> FastAPI:
             _StaticFiles(directory=str(_static_dir), html=True),
             name="dicom-viewer",
         )
+
+    # Web UI static files (packages/web/dist). When the dist directory is
+    # present, serve it at /. API routes take precedence because they are
+    # registered before this route. SPA fallback sends unknown paths to
+    # index.html so React Router handles /app/* deep links.
+    _web_dist = _Path(
+        os.environ.get("NEXUS_WEB_DIST", str(_Path(__file__).parent.parent.parent / "web" / "dist"))
+    )
+    if _web_dist.is_dir():
+        from fastapi.responses import FileResponse
+
+        app.mount(
+            "/assets",
+            _StaticFiles(directory=str(_web_dist / "assets"), check_dir=False),
+            name="web-assets",
+        )
+
+        # Files that Vite places at the root of dist (favicon, manifest,
+        # source maps, etc.) are served verbatim if they exist.
+        _index_html = _web_dist / "index.html"
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str):
+            candidate = _web_dist / full_path
+            if candidate.is_file():
+                return FileResponse(str(candidate))
+            return FileResponse(str(_index_html))
 
     return app
 

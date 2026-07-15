@@ -26,8 +26,9 @@
 **/uploads
 **/.rune_cache
 
-# Dotnet / desktop project — the server image doesn't need any of it.
+# Desktop projects — the server image doesn't need any of them.
 packages/desktop
+packages/desktop-v2
 
 # Local env files (we mount .env via docker-compose, not COPY)
 **/.env
