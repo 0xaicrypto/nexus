@@ -28,6 +28,7 @@ eggs/
 .eggs/
 *.manifest
 *.spec
+!packages/server/nexus-server.spec
 pip-log.txt
 pip-delete-this-directory.txt
 
