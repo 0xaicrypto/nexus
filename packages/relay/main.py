@@ -248,25 +248,27 @@ def _log_send(
     """Append one row to the audit table. Best-effort — never raises."""
     try:
         conn = sqlite3.connect(AUDIT_DB_PATH)
-        conn.execute(
-            "INSERT INTO sends "
-            "(ts, user_id, recipient_to, recipient_cc, subject, "
-            " body_bytes, status, client_ip, detail) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                datetime.now(timezone.utc).isoformat(),
-                user_id,
-                ", ".join(to_list),
-                ", ".join(cc_list),
-                subject[:512],
-                body_bytes,
-                status_str,
-                client_ip,
-                detail[:512],
-            ),
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "INSERT INTO sends "
+                "(ts, user_id, recipient_to, recipient_cc, subject, "
+                " body_bytes, status, client_ip, detail) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    datetime.now(timezone.utc).isoformat(),
+                    user_id,
+                    ", ".join(to_list),
+                    ", ".join(cc_list),
+                    subject[:512],
+                    body_bytes,
+                    status_str,
+                    client_ip,
+                    detail[:512],
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as e:  # noqa: BLE001
         logger.warning("audit log failed: %s", e)
 

@@ -557,8 +557,16 @@ export const useAppState = create<AppState>((set, get) => ({
       activePatient: null,
       activeMode: 'today',
       activeSessionId: '',
+      // PHI isolation: clear patient/study data so the next user
+      // session never sees a previous user's records.
+      patients: [],
+      studies: [],
+      activeStudyId: null,
+      activeWorkspace: 'research',
       commandPaletteOpen: false,
       newPatientDialogOpen: false,
+      contextRailContent: { kind: 'closed' },
+      contextRailOpen: false,
       // Drop the cached LLM status — next sign-in re-probes.
       llmStatus: null,
       llmStatusChecked: false,
@@ -774,7 +782,11 @@ export const useAppState = create<AppState>((set, get) => ({
    */
   hidePatient: async (hash: string) => {
     const before = useAppState.getState().patients;
-    set({ patients: before.filter((p) => p.patientHash !== hash) });
+    const wasActive = useAppState.getState().activePatient?.patientHash === hash;
+    set({
+      patients: before.filter((p) => p.patientHash !== hash),
+      ...(wasActive ? { activePatient: null } : {}),
+    });
     try {
       await api.archivePatient(hash);
       // Sync — server is authoritative now, refresh to get any

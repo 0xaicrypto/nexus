@@ -121,6 +121,15 @@ def enqueue_task(
     _init_db()
     conn = sqlite3.connect(_db_path())
     try:
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM async_tasks WHERE user_id = ? AND status IN (?, ?)",
+            (user_id, STATUS_QUEUED, STATUS_RUNNING),
+        ).fetchone()[0]
+        if pending >= 50:
+            raise RuntimeError(
+                f"async_tasks: user {user_id} already has {pending} pending/running "
+                "tasks; refusing to enqueue more"
+            )
         conn.execute(
             """
             INSERT INTO async_tasks
@@ -594,6 +603,21 @@ async def _worker_loop() -> None:
     can swap this for a condition variable + notify on enqueue.
     """
     logger.info("async_tasks worker started")
+    # Crash recovery: reset any tasks left 'running' from a previous
+    # server run — they were in-flight when the process died.
+    try:
+        _init_db()
+        _conn = sqlite3.connect(_db_path())
+        try:
+            _conn.execute(
+                "UPDATE async_tasks SET status = ? WHERE status = ?",
+                (STATUS_QUEUED, STATUS_RUNNING),
+            )
+            _conn.commit()
+        finally:
+            _conn.close()
+    except Exception as _e:  # noqa: BLE001
+        logger.warning("async_tasks: crash-recovery reset failed: %s", _e)
     while True:
         try:
             claimed = _claim_next_queued()
@@ -616,7 +640,7 @@ def start_worker() -> None:
     if _worker_task is not None and not _worker_task.done():
         return
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         # No loop yet (e.g. boot path before uvicorn started). The
         # caller should retry from inside an async startup hook.

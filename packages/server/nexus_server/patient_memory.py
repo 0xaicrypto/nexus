@@ -76,7 +76,7 @@ def _ensure_schema() -> None:
         # ALTER TABLE ... ADD COLUMN raises on duplicate; we swallow.
         try:
             conn.execute(
-                "ALTER TABLE sessions ADD COLUMN "
+                "ALTER TABLE nexus_sessions ADD COLUMN "
                 "patient_hash TEXT NOT NULL DEFAULT ''"
             )
         except sqlite3.OperationalError as e:

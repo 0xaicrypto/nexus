@@ -420,7 +420,7 @@ async def register_user(
                         "message": "This username is already registered."},
             )
         # First ever account on this server becomes the admin.
-        n_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        n_users = conn.execute("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL").fetchone()[0]
         role = "admin" if n_users == 0 else "user"
         try:
             conn.execute(
@@ -535,7 +535,7 @@ async def claim_account(
     if row is None:
         verify_password(body.password, None)  # timing equalisation
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "user_not_found",
                     "message": "No such account to claim."},
         )

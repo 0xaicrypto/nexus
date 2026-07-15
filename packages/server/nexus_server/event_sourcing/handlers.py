@@ -198,6 +198,14 @@ def _h_node_retracted(cur: sqlite3.Cursor, event: dict[str, Any]) -> None:
         (event["ts"], p["retracted_by_user"], p["reason"],
          event["user_id"], event["patient_hash"], p["node_id"]),
     )
+    if cur.rowcount == 0:
+        logger.warning(
+            "NODE_RETRACTED event_idx=%s: no provenance row found for "
+            "user_id=%s patient_hash=%s node_id=%s — node stays visible; "
+            "possible ordering issue or partial replay.",
+            event.get("event_idx"), event.get("user_id"),
+            event.get("patient_hash"), p.get("node_id"),
+        )
 
 
 def _h_edge_added(cur: sqlite3.Cursor, event: dict[str, Any]) -> None:
@@ -324,6 +332,7 @@ def _h_practitioner_candidate_surfaced(
         " extraction_model, extraction_prompt_id) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(user_id, fact_kind, pattern_key) DO UPDATE SET "
+        "  observed_count = excluded.observed_count, "
         "  distinct_patient_count = excluded.distinct_patient_count, "
         "  confidence = excluded.confidence, "
         "  last_reinforced_at = excluded.last_reinforced_at",
@@ -406,9 +415,9 @@ def _h_patient_registered(cur: sqlite3.Cursor, event: dict[str, Any]) -> None:
         " weight, created_at, updated_at, originating_event_idx) "
         "VALUES (?, ?, ?, 'patient', ?, 1.0, ?, ?, ?)",
         (
-            event["user_id"], p["patient_hash"], event["event_idx"],
+            event["user_id"], event.get("patient_hash") or p.get("patient_hash"), event["event_idx"],
             json.dumps({
-                "patient_hash": p["patient_hash"],
+                "patient_hash": event.get("patient_hash") or p.get("patient_hash"),
                 "source":       p["source"],
                 "demographics": p.get("demographics_json", {}),
             }, sort_keys=True),

@@ -150,6 +150,11 @@ def _open_conn() -> sqlite3.Connection:
     # Foreign-key support is off by default in sqlite3 connections —
     # turn it on so the chunks ↔ chunks_vec cascade actually runs.
     conn.execute("PRAGMA foreign_keys = ON")
+    # Match the WAL + busy_timeout settings from the main database so
+    # concurrent async reads and writes don't produce SQLITE_BUSY and
+    # silently degrade to lexical search.
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
@@ -454,6 +459,9 @@ async def upsert_chunks(
 
     conn = _open_conn()
     try:
+        # Wrap the delete + insert in an explicit transaction so a crash
+        # mid-upsert doesn't leave chunks_vec with dangling rowids.
+        conn.execute("BEGIN IMMEDIATE")
         # Remove prior chunks for this source so a re-index doesn't
         # duplicate. The two-table design means we have to delete
         # from both — vec0 doesn't cascade because the rowid linkage
@@ -490,6 +498,9 @@ async def upsert_chunks(
             )
         conn.commit()
         return len(embeddings)
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 

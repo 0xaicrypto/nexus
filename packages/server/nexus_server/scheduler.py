@@ -541,13 +541,18 @@ async def _tick_research_assessments(get_conn) -> int:
                 attendee_emails=to_addrs,
             )
             if to_addrs:
-                send_with_ics(
-                    to=to_addrs,
-                    subject=(f"[Research] {short_code} · "
-                             f"复诊提醒 · {patient_initials}"),
-                    body_text=event.description,
-                    event=event,
-                    from_addr=doctor_email or "",
+                import functools as _functools
+                await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    _functools.partial(
+                        send_with_ics,
+                        to=to_addrs,
+                        subject=(f"[Research] {short_code} · "
+                                 f"复诊提醒 · {patient_initials}"),
+                        body_text=event.description,
+                        event=event,
+                        from_addr=doctor_email or "",
+                    ),
                 )
 
             with get_conn() as conn:

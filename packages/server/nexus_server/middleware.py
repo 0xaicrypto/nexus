@@ -54,9 +54,9 @@ def check_rate_limit(
             cursor.execute(
                 """
                 UPDATE rate_limits SET request_count = request_count + 1
-                WHERE user_id = ? AND endpoint = ?
+                WHERE user_id = ? AND endpoint = ? AND window_start > ?
                 """,
-                (user_id, endpoint),
+                (user_id, endpoint, window_start),
             )
         else:
             # Create new window entry

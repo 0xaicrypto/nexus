@@ -388,11 +388,13 @@ function StudyDetail({studyId}: {studyId: string}) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api.getResearchStudy(studyId)
-       .then((s) => setStudy(s as never))
-       .catch((e) => console.warn('getStudy', e))
-       .finally(() => setLoading(false));
+       .then((s) => { if (!cancelled) setStudy(s as never); })
+       .catch((e) => { if (!cancelled) console.warn('getStudy', e); })
+       .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [studyId]);
 
   if (loading && !study) {
@@ -1671,9 +1673,9 @@ function ChatTab({studyId, study}: {studyId: string; study: StudyData}) {
         if (chunk.type === 'final_answer_chunk' && chunk.text) {
           setMessages((m) => {
             const next = m.slice();
-            const last = next[next.length - 1];
-            if (last && last.role === 'agent') {
-              last.text += chunk.text;
+            const idx = next.length - 1;
+            if (idx >= 0 && next[idx].role === 'agent') {
+              next[idx] = { ...next[idx], text: (next[idx].text || '') + chunk.text };
             }
             return next;
           });
@@ -1692,8 +1694,10 @@ function ChatTab({studyId, study}: {studyId: string; study: StudyData}) {
           };
           setMessages((m) => {
             const next = m.slice();
-            const last = next[next.length - 1];
-            if (last && last.role === 'agent') last.contextInfo = ci;
+            const idx = next.length - 1;
+            if (idx >= 0 && next[idx].role === 'agent') {
+              next[idx] = { ...next[idx], contextInfo: ci };
+            }
             return next;
           });
           continue;
@@ -1706,11 +1710,14 @@ function ChatTab({studyId, study}: {studyId: string; study: StudyData}) {
         if (sr.type === 'scope_resolved') {
           setMessages((m) => {
             const next = m.slice();
-            const last = next[next.length - 1];
-            if (last && last.role === 'agent') {
-              last.scope_info = {
-                cohort_size: sr.cohort_size || 0,
-                focus_patient_hash: sr.focus_patient_hash || null,
+            const idx = next.length - 1;
+            if (idx >= 0 && next[idx].role === 'agent') {
+              next[idx] = {
+                ...next[idx],
+                scope_info: {
+                  cohort_size: sr.cohort_size || 0,
+                  focus_patient_hash: sr.focus_patient_hash || null,
+                },
               };
             }
             return next;
@@ -1731,8 +1738,8 @@ function ChatTab({studyId, study}: {studyId: string; study: StudyData}) {
       setBusy(false);
       setMessages((m) => {
         const next = m.slice();
-        const last = next[next.length - 1];
-        if (last) last.streaming = false;
+        const idx = next.length - 1;
+        if (idx >= 0) next[idx] = { ...next[idx], streaming: false };
         return next;
       });
     }

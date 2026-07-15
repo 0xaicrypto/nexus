@@ -195,12 +195,23 @@ async def ensemble_call(
             ),
         )
 
-    if len(successful) == 1 or not require_consensus:
+    if not require_consensus:
         return EnsembleResult(
             providers=results,
             consensus=True,
             consensus_text=successful[0].text,
             disagreement_summary="",
+        )
+
+    if len(successful) == 1:
+        return EnsembleResult(
+            providers=results,
+            consensus=False,
+            consensus_text="",
+            disagreement_summary=(
+                f"Only one provider responded ({successful[0].provider}); "
+                "cannot establish consensus. Treat as low-confidence."
+            ),
         )
 
     # Pairwise Jaccard over word-trigrams to spot near-duplicates.

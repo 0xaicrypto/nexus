@@ -36,7 +36,7 @@ import json
 import logging
 from typing import AsyncIterator, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -102,6 +102,7 @@ def _sse(event: dict) -> str:
 @router.post("/chat")
 async def chat(
     req: ChatRequest,
+    request: Request,
     current_user: str = Depends(get_current_user),
 ):
     """Stream a chat turn as SSE events. See module docstring for shape."""
@@ -379,6 +380,8 @@ async def chat(
                 if chunk.kind == "citations":
                     collected_refs = chunk.data.get("refs", [])
                 yield _sse({"type": chunk.kind, **chunk.data})
+                if await request.is_disconnected():
+                    return
                 await asyncio.sleep(0)   # cooperative yield
 
             # 3. Persist the assistant response verbatim per Rev-8

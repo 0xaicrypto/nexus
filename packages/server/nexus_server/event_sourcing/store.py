@@ -237,6 +237,13 @@ class Store:
                 "WHERE projection_name = 'all'",
                 (event_idx, ts),
             )
+            if cur.rowcount == 0:
+                cur.execute(
+                    "INSERT OR IGNORE INTO projection_state "
+                    "(projection_name, last_applied_event_idx, last_applied_ts) "
+                    "VALUES ('all', ?, ?)",
+                    (event_idx, ts),
+                )
 
         logger.debug(
             "emit_and_apply kind=%s v=%s event_idx=%d user=%s patient=%s",
