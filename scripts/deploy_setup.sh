@@ -99,11 +99,11 @@ fi
 # ── Step 6: build + start ────────────────────────────────────────────
 echo ""
 echo "Building Docker images (first run takes ~3–5 min)…"
-docker compose build
+docker compose --env-file .env.production build
 
 echo ""
 echo "Starting services…"
-docker compose up -d
+docker compose --env-file .env.production up -d
 
 echo ""
 echo "Waiting 15 s for Caddy to negotiate the HTTPS cert…"

@@ -171,6 +171,11 @@ include = ["nexus_server*"]
     # Glob covers any future assets (css/js/wasm) that get added
     # alongside dicom-viewer.html.
     "static/**/*",
+    # Alembic marker file — migrations/runner.py checks for this to
+    # locate the migration root, then drives alembic programmatically.
+    # Without it the Docker image (non-editable install) crash-loops
+    # on startup with "alembic.ini missing".
+    "migrations/alembic.ini",
 ]
 
 [tool.black]
