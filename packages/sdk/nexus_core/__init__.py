@@ -44,32 +44,38 @@ Architecture:
 __version__ = "0.5.0"
 
 # ── Entry points + Builder ─────────────────────────────────────────────
-from .builder import local, testnet, mainnet, builder, Builder
-
-# ── Core abstractions ──────────────────────────────────────────────────
-from .core.backend import StorageBackend
-from .core.providers import (
-    AgentRuntime,
-    SessionProvider,
-    ArtifactProvider,
-    TaskProvider,
-    ImpressionProvider,
-)
-from .core.models import (
-    Checkpoint, Artifact,
-    Impression, ImpressionDimensions, ImpressionSummary, NetworkStats,
-    GossipMessage, GossipSession, AgentProfile,
-)
-from .core.flush import FlushPolicy, FlushBuffer, WriteAheadLog
-from .utils import robust_json_parse, load_dotenv
-from .tools import BaseTool, ToolResult, ToolCall, ToolRegistry, WebSearchTool, URLReaderTool
-from .llm import LLMClient, LLMProvider
-from .mcp import MCPClient, MCPServerConfig, MCPManager
-from .skills import SkillManager
+from .backends.local import LocalBackend
 
 # ── Backends ───────────────────────────────────────────────────────────
 from .backends.mock import MockBackend
-from .backends.local import LocalBackend
+from .builder import Builder, builder, local, mainnet, testnet
+
+# ── Core abstractions ──────────────────────────────────────────────────
+from .core.backend import StorageBackend
+from .core.flush import FlushBuffer, FlushPolicy, WriteAheadLog
+from .core.models import (
+    AgentProfile,
+    Artifact,
+    Checkpoint,
+    GossipMessage,
+    GossipSession,
+    Impression,
+    ImpressionDimensions,
+    ImpressionSummary,
+    NetworkStats,
+)
+from .core.providers import (
+    AgentRuntime,
+    ArtifactProvider,
+    ImpressionProvider,
+    SessionProvider,
+    TaskProvider,
+)
+from .llm import LLMClient, LLMProvider
+from .mcp import MCPClient, MCPManager, MCPServerConfig
+from .skills import SkillManager
+from .tools import BaseTool, ToolCall, ToolRegistry, ToolResult, URLReaderTool, WebSearchTool
+from .utils import load_dotenv, robust_json_parse
 
 try:
     from .backends.chain import ChainBackend
@@ -77,36 +83,35 @@ except ImportError:
     ChainBackend = None  # web3 not installed
 
 # ── Provider implementations ───────────────────────────────────────────
-from .providers import (
-    SessionProviderImpl,
-    ArtifactProviderImpl,
-    TaskProviderImpl,
-    ImpressionProviderImpl,
-)
-
 # ── Adapter registry ──────────────────────────────────────────────────
 from .adapters.registry import AdapterRegistry
-
-# ── Live thinking telemetry (server SSE / desktop live panel) ─────────
-from .thinking import ThinkingEmitter, ThinkingEvent
-
-# ── Social Protocol ───────────────────────────────────────────────────
-from .social.gossip import GossipProtocol
-from .social.profile import ProfileManager
-from .social.graph import SocialGraph
-
-# ── Infrastructure (used by ChainBackend) ──────────────────────────────
-from .state import StateManager, ERC8004Identity, AgentStateRecord
 
 # ── Generic LLM utilities ──────────────────────────────────────────────
 # Reusable file-distillation pipeline (formerly server-only).
 from .distiller import (
-    distill,
-    extract_text,
     DISTILL_INPUT_CHAR_BUDGET,
     DISTILL_OUTPUT_CHAR_BUDGET,
     DISTILL_SYSTEM_PROMPT,
+    distill,
+    extract_text,
 )
+from .providers import (
+    ArtifactProviderImpl,
+    ImpressionProviderImpl,
+    SessionProviderImpl,
+    TaskProviderImpl,
+)
+
+# ── Social Protocol ───────────────────────────────────────────────────
+from .social.gossip import GossipProtocol
+from .social.graph import SocialGraph
+from .social.profile import ProfileManager
+
+# ── Infrastructure (used by ChainBackend) ──────────────────────────────
+from .state import AgentStateRecord, ERC8004Identity, StateManager
+
+# ── Live thinking telemetry (server SSE / desktop live panel) ─────────
+from .thinking import ThinkingEmitter, ThinkingEvent
 
 try:
     from .chain import BSCClient
@@ -122,8 +127,8 @@ except ImportError:
 # adapter module and get a clean ImportError; everyone else still gets
 # a working ``nexus_core`` package.
 try:
+    from .adapters.a2a import A2AAgentConfig, A2ARuntime, StatelessA2AAgent
     from .adapters.a2a_task_store import BNBChainTaskStore
-    from .adapters.a2a import StatelessA2AAgent, A2ARuntime, A2AAgentConfig
     _A2A_AVAILABLE = True
 except Exception as _a2a_err:  # noqa: BLE001 — optional integration
     BNBChainTaskStore = None
@@ -142,8 +147,8 @@ except Exception as _a2a_err:  # noqa: BLE001 — optional integration
 # softening pattern as A2A: don't make the whole SDK uninportable just
 # because the operator hasn't pulled in the ADK integration.
 try:
-    from .session import BNBChainSessionService
     from .artifact import BNBChainArtifactService
+    from .session import BNBChainSessionService
     _ADK_AVAILABLE = True
 except Exception as _adk_err:  # noqa: BLE001 — optional integration
     BNBChainSessionService = None
@@ -155,51 +160,65 @@ except Exception as _adk_err:  # noqa: BLE001 — optional integration
         _adk_err,
     )
 
-from .memory import (
-    EventLog, Event, CuratedMemory, EventLogCompactor,
-    Episode, EpisodesStore,
-    Fact, FactsStore,
-    LearnedSkill, SkillsStore,
-    PersonaVersion, PersonaStore,
-    KnowledgeArticle, KnowledgeStore,
+from .anchor import (
+    SCHEMA_V1 as ANCHOR_SCHEMA_V1,
 )
-from .contracts import ContractEngine, ContractSpec, CheckResult, DriftScore, Rule
 
 # ── Anchor batch (BEP-Nexus §3) ───────────────────────────────────────
 from .anchor import (
+    ZERO_DIGEST_HEX,
     AnchorBatch,
     build_anchor_batch,
+)
+from .anchor import (
     canonicalize as canonicalize_manifest,
-    SCHEMA_V1 as ANCHOR_SCHEMA_V1,
-    ZERO_DIGEST_HEX,
 )
-
-# ── Recursive Language Model (long-context projection primitive) ──────
-# See `nexus_core.rlm` and `docs/design/nexus-architecture.md`.
-from .rlm import (
-    RLMRunner,
-    RLMConfig,
-    RLMResult,
-    TrajectoryEntry as RLMTrajectoryEntry,
-    run_rlm,
-)
+from .contracts import CheckResult, ContractEngine, ContractSpec, DriftScore, Rule
 
 # ── Falsifiable evolution (Phase O — BEP-Nexus §3.4) ──────────────────
 # Proposal / verdict / revert primitives + the normative verdict
 # decision rules. See `nexus_core.evolution` and
 # `docs/design/nexus-architecture.md`.
 from .evolution import (
-    EvolutionProposal,
-    EvolutionVerdict,
-    EvolutionRevert,
-    TaskKindPrediction,
     DriftThresholds,
+    EvolutionProposal,
+    EvolutionRevert,
+    EvolutionVerdict,
     FixMatch,
     ObservedRegression,
-    score_verdict,
+    TaskKindPrediction,
     make_proposal_event,
-    make_verdict_event,
     make_revert_event,
+    make_verdict_event,
+    score_verdict,
+)
+from .memory import (
+    CuratedMemory,
+    Episode,
+    EpisodesStore,
+    Event,
+    EventLog,
+    EventLogCompactor,
+    Fact,
+    FactsStore,
+    KnowledgeArticle,
+    KnowledgeStore,
+    LearnedSkill,
+    PersonaStore,
+    PersonaVersion,
+    SkillsStore,
+)
+
+# ── Recursive Language Model (long-context projection primitive) ──────
+# See `nexus_core.rlm` and `docs/design/nexus-architecture.md`.
+from .rlm import (
+    RLMConfig,
+    RLMResult,
+    RLMRunner,
+    run_rlm,
+)
+from .rlm import (
+    TrajectoryEntry as RLMTrajectoryEntry,
 )
 
 try:

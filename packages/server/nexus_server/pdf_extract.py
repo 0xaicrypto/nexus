@@ -364,8 +364,8 @@ async def _extract_via_vision_single_image(
     send_bytes = raw
     if mime in ("image/heic", "image/heif"):
         try:
-            from PIL import Image
             import pillow_heif  # noqa: F401 (registers the HEIF opener)
+            from PIL import Image
             img = Image.open(io.BytesIO(raw))
             buf = io.BytesIO()
             img.convert("RGB").save(buf, format="JPEG", quality=88)

@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("nexus.relay")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

@@ -41,7 +41,10 @@ import uuid
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
+
+import numpy as np
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -784,7 +787,6 @@ def render_grid_png(
       a SINGLE whole-series grid — making the whole "scan 25 grids of
       16 slices each" pipeline collapse to one 16-thumbnail overview.
     """
-    import numpy as np
     import pydicom
     from PIL import Image
 

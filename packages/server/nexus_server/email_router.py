@@ -29,13 +29,12 @@ side can stay one form + one POST.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from nexus_server.auth import get_current_user
 from nexus_server import email_send
+from nexus_server.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/email", tags=["email"])

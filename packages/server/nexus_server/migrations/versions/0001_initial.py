@@ -46,7 +46,6 @@ def upgrade() -> None:
     # nexus_server.config.DATABASE_URL points at — the same DB Alembic
     # is operating on. We invoke them in dependency order.
     import nexus_server.database as _db_mod
-    import nexus_server.event_sourcing as _es
     from nexus_server.event_sourcing import init_event_sourcing_schema
 
     # event_log + projection_state + clinical_graph_* + cached_views

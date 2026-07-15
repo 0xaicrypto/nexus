@@ -28,8 +28,8 @@ Usage:
         response = engine.recover(result)
 """
 
-from .spec import ContractSpec, Rule
-from .engine import ContractEngine, CheckResult
 from .drift import DriftScore
+from .engine import CheckResult, ContractEngine
+from .spec import ContractSpec, Rule
 
 __all__ = ["ContractSpec", "Rule", "ContractEngine", "CheckResult", "DriftScore"]

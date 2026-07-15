@@ -30,20 +30,23 @@ Usage:
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import Any, Optional
 
 from ..core.models import Checkpoint
-from ..core.providers import SessionProvider, ArtifactProvider
+from ..core.providers import ArtifactProvider, SessionProvider
 
 # ADK imports are optional — only needed when actually using this adapter
 try:
-    from google.adk.sessions import BaseSessionService, GetSessionConfig, ListSessionsResponse
-    from google.adk.memory import BaseMemoryService
     from google.adk.artifacts import BaseArtifactService
     from google.adk.events import Event
-    from google.adk.sessions import Session
+    from google.adk.memory import BaseMemoryService
+    from google.adk.sessions import (
+        BaseSessionService,
+        GetSessionConfig,
+        ListSessionsResponse,
+        Session,
+    )
     from google.genai import types
 
     _ADK_AVAILABLE = True
@@ -54,7 +57,6 @@ except ImportError:
     BaseArtifactService = object
 
 from .registry import AdapterRegistry
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # Session Adapter

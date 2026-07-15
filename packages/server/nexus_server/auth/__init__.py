@@ -11,8 +11,8 @@ Public surface (what other server modules / tests import):
 
 from .routes import *  # noqa: F401, F403  — re-export for back-compat
 from .routes import (
-    router,
-    get_current_user,
     create_jwt_token,
+    get_current_user,
+    router,
     verify_jwt_token,
 )

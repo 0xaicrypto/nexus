@@ -328,7 +328,7 @@ def list_messages(
 
     Phase 2a unification (docs/design/EVENT_LOG_UNIFICATION.md):
     the canonical source of truth is the SHARED ``twin_event_log`` table
-    in rune_server.db, written by every chat_router_v2 turn via
+    in nexus_server.db, written by every chat_router_v2 turn via
     ``Store.emit_and_apply``. The per-user file at
     ``~/.nexus_server/twins/{user_id}/.../events.db`` is now a
     deprecated mirror — we read it as a fallback for older rows that

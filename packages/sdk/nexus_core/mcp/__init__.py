@@ -18,6 +18,6 @@ Usage:
     result = await manager.call_tool("filesystem", "read_file", {"path": "/tmp/test.txt"})
 """
 
-from .client import MCPClient, MCPServerConfig, MCPManager, MCPTool
+from .client import MCPClient, MCPManager, MCPServerConfig, MCPTool
 
 __all__ = ["MCPClient", "MCPServerConfig", "MCPManager", "MCPTool"]

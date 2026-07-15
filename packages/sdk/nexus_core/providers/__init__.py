@@ -14,10 +14,10 @@ Phase J namespace stores (``FactsStore`` / etc.) from
 ``nexus_core.memory`` instead.
 """
 
-from .session import SessionProviderImpl
 from .artifact import ArtifactProviderImpl
-from .task import TaskProviderImpl
 from .impression import ImpressionProviderImpl
+from .session import SessionProviderImpl
+from .task import TaskProviderImpl
 
 __all__ = [
     "SessionProviderImpl",

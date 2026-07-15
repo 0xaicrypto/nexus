@@ -27,14 +27,14 @@ Architecture based on: "Stateless Decision Memory for Enterprise AI Agents"
 (arXiv:2604.20158) and AHE (arXiv:2604.25850).
 """
 
-from .event_log import EventLog, Event
-from .curated import CuratedMemory
 from .compactor import EventLogCompactor
-from .episodes import Episode, EpisodesStore, EpisodeOutcome
-from .facts import Fact, FactsStore, FactCategory
-from .skills import LearnedSkill, SkillsStore
-from .persona import PersonaVersion, PersonaStore
+from .curated import CuratedMemory
+from .episodes import Episode, EpisodeOutcome, EpisodesStore
+from .event_log import Event, EventLog
+from .facts import Fact, FactCategory, FactsStore
 from .knowledge import KnowledgeArticle, KnowledgeStore
+from .persona import PersonaStore, PersonaVersion
+from .skills import LearnedSkill, SkillsStore
 
 __all__ = [
     # DPM canonical

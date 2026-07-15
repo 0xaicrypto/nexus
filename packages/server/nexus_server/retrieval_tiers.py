@@ -679,7 +679,7 @@ def _gather_patient_roster(
     Empty string when the user has no patients yet.
     """
     # F-merge-patients-db — the ``patients`` table now lives in the
-    # SHARED rune_server.db (the caller's ``conn``), so we can read
+    # SHARED nexus_server.db (the caller's ``conn``), so we can read
     # directly without opening a second connection. The earlier
     # F-roster-db-split workaround that hand-opened dicom_index.db is
     # now redundant and removed — the migration in
@@ -1038,8 +1038,8 @@ async def yield_t3_llm(
     # scope. Per-user only.
     try:
         from nexus_server.practitioner.session_takeaway import (
-            fetch_prior_insights, render_prior_insights_block,
-            scope_tuple_from_request,
+            fetch_prior_insights,
+            render_prior_insights_block,
         )
         # Reconstruct the scope tuple from the parameters we already
         # have. This mirrors chat_router.scope_tuple_from_request.
@@ -1415,8 +1415,9 @@ async def _t3_stream_with_images(
         if mime.lower() in ("image/tiff", "image/tif") or \
                 name.lower().endswith((".tif", ".tiff")):
             try:
-                from PIL import Image as _PILImage
                 import io as _io
+
+                from PIL import Image as _PILImage
                 im = _PILImage.open(_io.BytesIO(raw))
                 # Multi-page TIFF: keep only the first page — Gemini
                 # would treat additional pages as separate images
@@ -1664,7 +1665,8 @@ async def yield_t4_web(
     # scope is straightforwardly "patient".
     try:
         from nexus_server.practitioner.session_takeaway import (
-            fetch_prior_insights, render_prior_insights_block,
+            fetch_prior_insights,
+            render_prior_insights_block,
         )
         insights = fetch_prior_insights(
             conn, user_id=user_id,

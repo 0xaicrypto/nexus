@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,10 +59,12 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfgen import canvas as _canvas
-from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import (
-    Paragraph, SimpleDocTemplate, Spacer, HRFlowable, KeepTogether,
+    HRFlowable,
+    KeepTogether,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
 )
 
 logger = logging.getLogger(__name__)

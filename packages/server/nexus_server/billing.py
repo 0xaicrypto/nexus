@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Optional
 
 from nexus_server import config
 from nexus_server.database import get_db_connection

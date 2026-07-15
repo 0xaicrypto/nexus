@@ -366,6 +366,7 @@ def _parse_addr_list(raw: str | list[str] | None) -> list[str]:
 # junk before paying the SMTP roundtrip cost. The transport layer will
 # reject anything that slips through.
 import re as _re
+
 _ADDR_RE = _re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 

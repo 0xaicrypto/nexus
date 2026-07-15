@@ -40,8 +40,14 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import (
-    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
-    UploadFile, status,
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
 )
 from pydantic import BaseModel
 
@@ -624,7 +630,9 @@ async def upload_file(
     image_normalized_path_str = ""
     try:
         from nexus_server.image_normalizer import (
-            looks_normalizable, transcode_to_jpeg, derive_normalized_path,
+            derive_normalized_path,
+            looks_normalizable,
+            transcode_to_jpeg,
         )
         if looks_normalizable(name, mime):
             norm_dest = derive_normalized_path(disk_path)
@@ -901,7 +909,8 @@ def _run_dicom_prerender_async(
     """
     try:
         from nexus_server.dicom import (
-            prerender_archive_for_upload, _set_prerender_progress,
+            _set_prerender_progress,
+            prerender_archive_for_upload,
         )
         # If the medic bound this upload to a patient at upload time
         # (force_patient_hash), the uploads row already has that hash —
@@ -1100,8 +1109,9 @@ def _run_dicom_prerender_async(
                 # surfaces the study under the right patient.
                 if force_patient_hash and new_study_id:
                     try:
-                        from nexus_server.dicom import _index_db_path
                         import sqlite3 as _sql
+
+                        from nexus_server.dicom import _index_db_path
                         dconn = _sql.connect(_index_db_path())
                         try:
                             # Re-read the synchronous insert's patient_hash
@@ -1473,9 +1483,10 @@ async def _record_patient_in_curated_memory(
 
     Idempotent via CuratedMemory.add_memory's exact-match dedupe.
     """
-    from nexus_server.twin_manager import get_twin
-    from nexus_server.dicom import get_patient_context_block
     from datetime import datetime, timezone
+
+    from nexus_server.dicom import get_patient_context_block
+    from nexus_server.twin_manager import get_twin
 
     twin = await get_twin(user_id)
     cm = getattr(twin, "curated_memory", None)
@@ -1720,8 +1731,9 @@ def _bytes_to_text(
 ) -> Optional[str]:
     """Run the SDK distiller's text extractor on raw bytes."""
     try:
-        from nexus_core.distiller import extract_text
         import base64 as _b64
+
+        from nexus_core.distiller import extract_text
         b64 = _b64.b64encode(raw).decode("ascii")
         text, _src = extract_text(name, mime, None, b64)
         return text or None
@@ -1881,7 +1893,8 @@ def _run_dicom_ingester_safe(
     from nexus_server.dicom import load_study
     from nexus_server.event_sourcing import Store, init_event_sourcing_schema
     from nexus_server.memorization.dicom_ingester import (
-        DicomIngester, StudyInput, KeySliceInput,
+        DicomIngester,
+        StudyInput,
     )
 
     parsed = load_study(user_id, study_id)
@@ -2003,7 +2016,9 @@ def _run_quick_scan_after_ingest(
     """
     from nexus_server import quick_scan
     from nexus_server.event_sourcing import (
-        EventKind, Store, init_event_sourcing_schema,
+        EventKind,
+        Store,
+        init_event_sourcing_schema,
     )
     from nexus_server.event_sourcing.handlers import _h_node_added
 

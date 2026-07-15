@@ -20,18 +20,17 @@ import asyncio
 import json
 import logging
 import uuid
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from .providers import (
-    LLMProvider,
-    KIMI_DEFAULT_BASE_URL,
     KIMI_DEFAULT_MODEL,
+    LLMProvider,
     resolve_kimi_api_key,
     resolve_kimi_base_url,
 )
 
 if TYPE_CHECKING:
-    from nexus_core.tools.base import ToolCall, ToolRegistry, ToolResult
+    from nexus_core.tools.base import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -259,8 +258,9 @@ class LLMClient:
         after, so the desktop's live thinking panel can show the loop
         as it unfolds rather than only the final text.
         """
-        from nexus_core.tools.base import ToolCall
         import time as _time
+
+        from nexus_core.tools.base import ToolCall
 
         tool_defs = tools.get_definitions()
         logger.info(
@@ -472,8 +472,9 @@ class LLMClient:
             ``include_thoughts`` so reasoning tokens come back in
             separate parts; we forward them as ``reasoning`` events.
         """
-        from google.genai import types
         import asyncio
+
+        from google.genai import types
 
         # Convert tool definitions to Gemini format with proper Schema objects
         gemini_tools = []
@@ -980,8 +981,9 @@ class LLMClient:
         json_mode: bool = False,
         thinking_emitter=None,
     ) -> str:
-        from google.genai import types
         import asyncio
+
+        from google.genai import types
 
         contents = []
         for msg in messages:

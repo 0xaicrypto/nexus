@@ -29,7 +29,6 @@ When NOT to use:
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from nexus_core.tools.base import BaseTool, ToolResult
 

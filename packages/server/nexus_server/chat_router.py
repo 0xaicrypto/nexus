@@ -167,7 +167,8 @@ async def chat(
                         if p.is_file():
                             raw = p.read_bytes()
                             from nexus_server.files import (
-                                _bytes_to_text, _save_extracted_text,
+                                _bytes_to_text,
+                                _save_extracted_text,
                             )
                             text_out = _bytes_to_text(raw, name, mime)
                             if text_out:
@@ -607,7 +608,9 @@ def _run_chat_ingester_safe(
     from nexus_server.event_sourcing import Store, init_event_sourcing_schema
     from nexus_server.memorization.chat_ingester import ChatIngester
     from nexus_server.memorization.llm_extractor import (
-        llm_chat_extractor, EXTRACTION_MODEL_TAG, EXTRACTION_PROMPT_ID,
+        EXTRACTION_MODEL_TAG,
+        EXTRACTION_PROMPT_ID,
+        llm_chat_extractor,
     )
 
     with get_db_connection() as conn:
@@ -708,9 +711,9 @@ def _run_session_takeaway_safe(
     """
     from nexus_server.event_sourcing import init_event_sourcing_schema
     from nexus_server.practitioner.session_takeaway import (
-        should_distill_this_turn,
         distill_session_takeaways,
         scope_tuple_from_request,
+        should_distill_this_turn,
     )
 
     with get_db_connection() as conn:
@@ -760,8 +763,8 @@ def _run_practitioner_observation_safe(
     """
     from nexus_server.event_sourcing import Store, init_event_sourcing_schema
     from nexus_server.practitioner import (
-        extract_from_encounter,
         distill,
+        extract_from_encounter,
     )
     from nexus_server.practitioner.heuristic_extractor import (
         extract_from_user_text,

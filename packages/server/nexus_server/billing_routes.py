@@ -18,13 +18,13 @@ the webhook which 400s (Stripe will retry on 5xx so we avoid that).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from nexus_server import billing, config
+
 # get_current_user re-exported from nexus_server.auth (auth/__init__.py).
 # Returns the user_id string, not an ORM object — every route looks up
 # whatever fields it needs via get_db_connection().

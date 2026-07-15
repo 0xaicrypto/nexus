@@ -11,7 +11,7 @@ full archaeology):
 
 | Store | Path | Schema | Writers | Readers |
 |---|---|---|---|---|
-| **Shared** (canonical going forward) | `rune_server.db` table `twin_event_log` | `(event_idx, event_kind, event_kind_version, user_id, patient_hash, ts_us, payload_json, caused_by)` | `event_sourcing.Store.emit_and_apply` (chat_router_v2, research_router, clinical_graph handlers, …) | `chat_ingester._concat_source_text`, any new event-sourcing projection |
+| **Shared** (canonical going forward) | `nexus_server.db` table `twin_event_log` | `(event_idx, event_kind, event_kind_version, user_id, patient_hash, ts_us, payload_json, caused_by)` | `event_sourcing.Store.emit_and_apply` (chat_router_v2, research_router, clinical_graph handlers, …) | `chat_ingester._concat_source_text`, any new event-sourcing projection |
 | **Per-user file** (legacy) | `~/.nexus_server/twins/{user_id}/event_log/{agent_id}.db` table `events` | `(idx, timestamp, event_type, content, metadata, agent_id, session_id)` | `twin_event_log.append_event` (workflows_router, RunWorkflowTool); `_mirror_chat_to_per_user_log` (E14 band-aid) | `twin_event_log.list_messages` (= `/api/v1/agent/messages` endpoint, used by desktop history pane + `_recent_history_messages` LLM-context loader) |
 
 The split makes desktop history pane + LLM history context **silently

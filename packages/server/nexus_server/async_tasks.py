@@ -28,7 +28,6 @@ Why a SQL table rather than an in-memory queue:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import sqlite3
 import time
@@ -49,7 +48,7 @@ STATUS_FAILED    = "failed"
 
 def _db_path() -> Path:
     """Mirror dicom._index_db_path's convention — same data dir, own
-    file. Separate from rune_server.db so a corrupted async_tasks
+    file. Separate from nexus_server.db so a corrupted async_tasks
     table doesn't take down chat."""
     import os
     home = Path(
@@ -653,9 +652,10 @@ def start_worker() -> None:
 # ── HTTP API surface ────────────────────────────────────────────────
 
 
-from fastapi import APIRouter, Depends, HTTPException  # noqa: E402
-from pydantic import BaseModel                        # noqa: E402
-from nexus_server.auth import get_current_user        # noqa: E402
+from fastapi import APIRouter, Depends  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
+
+from nexus_server.auth import get_current_user  # noqa: E402
 
 router = APIRouter(prefix="/api/v1/async-tasks", tags=["async-tasks"])
 

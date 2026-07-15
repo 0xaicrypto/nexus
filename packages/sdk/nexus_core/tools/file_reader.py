@@ -267,5 +267,5 @@ class ReadUploadedFileTool(BaseTool):
                 f"ask the user; just continue reading until you have "
                 f"the whole file or enough to answer the question.]"
             )
-            header += f"\n[Tip: use search='keyword' to find specific content]"
+            header += "\n[Tip: use search='keyword' to find specific content]"
         return ToolResult(output=f"{header}\n\n{chunk}")

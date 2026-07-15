@@ -20,7 +20,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from nexus_core.tools.base import BaseTool, ToolResult
 
@@ -170,7 +170,8 @@ class EvolveSkillTool(BaseTool):
 
         # Resolve per-skill models from frontmatter.
         from nexus_core.skills.manager import (
-            _extract_model, _extract_optimizer_model,
+            _extract_model,
+            _extract_optimizer_model,
         )
         target_model    = _extract_model(frontmatter)
         optimizer_model = _extract_optimizer_model(frontmatter) or target_model
@@ -179,7 +180,8 @@ class EvolveSkillTool(BaseTool):
 
         # Build TaskExample list.
         from nexus_server.skill_evolution import (
-            TaskExample, evolve_skill_loop,
+            TaskExample,
+            evolve_skill_loop,
         )
         ex_list = []
         for raw_ex in examples:

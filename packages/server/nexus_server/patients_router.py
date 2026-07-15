@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -56,7 +55,7 @@ def _conn() -> sqlite3.Connection:
 
 def init_patients_table() -> None:
     """F-merge-patients-db — ``patients`` table now lives in the
-    SHARED rune_server.db, not dicom_index.db.
+    SHARED nexus_server.db, not dicom_index.db.
 
     Why the move: ``patients`` is queried from FIVE places (this
     router, dicom_router, retrieval_tiers, session_takeaway,
@@ -510,7 +509,7 @@ async def delete_patient(
     # Diagnostic log: every "delete worked but the patient is still
     # there" report has historically been one of three things —
     # (a) user_id drift between upload-time and delete-time,
-    # (b) row in dicom_index.db but DELETE was hitting rune_server.db,
+    # (b) row in dicom_index.db but DELETE was hitting nexus_server.db,
     # (c) stale sidecar binary still serving the old endpoint code.
     # Print enough at INFO to disambiguate (b) and (c) on the fly, and
     # enough at INFO + the row counts in the return to disambiguate (a).

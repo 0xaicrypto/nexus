@@ -15,14 +15,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from nexus_server import twin_event_log, twin_manager
 from nexus_server.auth import get_current_user
 from nexus_server.database import get_db_connection
 from nexus_server.sync_anchor import list_anchors_for_user
-from nexus_server import twin_event_log
-from nexus_server import twin_manager
 
 # Back-compat re-exports (S3 → S5 evolution): these used to live here
 # as functions reading sync_events. After S5 they delegate to
@@ -396,6 +395,7 @@ async def get_agent_state(
 ) -> AgentStateSnapshot:
     """One-shot read for the sidebar."""
     from datetime import datetime, timezone
+
     from nexus_server.config import get_config
     config = get_config()
 
@@ -1142,7 +1142,8 @@ async def manual_revert_proposal(
     """
     from fastapi import HTTPException
     from nexus_core.evolution import (
-        EvolutionVerdict, EvolutionRevert,
+        EvolutionRevert,
+        EvolutionVerdict,
     )
 
     twin = await twin_manager.get_twin(current_user)

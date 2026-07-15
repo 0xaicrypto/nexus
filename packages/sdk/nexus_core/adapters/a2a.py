@@ -33,19 +33,24 @@ wrapper that simulates this boundary.
     └─────────────────────┘
 """
 
-import uuid
 import time
-from typing import Optional, Callable, Awaitable
+import uuid
 from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 from a2a.types import (
-    Task, TaskState, TaskStatus, Message, Artifact,
-    Part, TextPart, Role,
+    Artifact,
+    Message,
+    Role,
+    Task,
+    TaskState,
+    TaskStatus,
+    TextPart,
 )
 
-from nexus_core.state import StateManager
 from nexus_core.adapters.a2a_task_store import BNBChainTaskStore
 from nexus_core.flush import FlushPolicy
+from nexus_core.state import StateManager
 
 
 @dataclass
@@ -300,13 +305,13 @@ class A2ARuntime:
             part = message.parts[0]
             msg_text = part.text if hasattr(part, 'text') else (part.root.text if hasattr(part, 'root') and hasattr(part.root, 'text') else str(part))
 
-        print(f"\n    ╭─── A2A message/send ───────────────────────────────────")
+        print("\n    ╭─── A2A message/send ───────────────────────────────────")
         print(f"    │ From: {sender} ({self.runtime_id})")
         print(f"    │ To:   {receiver} ({target_runtime.runtime_id})")
         print(f"    │ Msg:  \"{msg_text[:70]}{'…' if len(msg_text) > 70 else ''}\"")
         if task_id:
             print(f"    │ Task: {task_id[:24]}…")
-        print(f"    ╰─────────────────────────────────────────────────────────")
+        print("    ╰─────────────────────────────────────────────────────────")
 
         result = await target_runtime.agent.handle_message(
             message=message,
@@ -314,12 +319,12 @@ class A2ARuntime:
             context_id=context_id,
         )
 
-        print(f"    ╭─── A2A response ────────────────────────────────────────")
+        print("    ╭─── A2A response ────────────────────────────────────────")
         print(f"    │ {receiver} → {sender}: task {result.id[:16]}… = {result.status.state.value}")
         if result.artifacts:
             for art in result.artifacts:
                 print(f"    │ Artifact: {art.name or 'unnamed'}")
-        print(f"    ╰─────────────────────────────────────────────────────────")
+        print("    ╰─────────────────────────────────────────────────────────")
 
         return result
 

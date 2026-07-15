@@ -1,5 +1,5 @@
 [project]
-name = "rune-protocol"
+name = "nexus-workspace"
 version = "0.1.0"
 description = "Self-evolving AI agents with on-chain identity — monorepo"
 readme = "README.md"

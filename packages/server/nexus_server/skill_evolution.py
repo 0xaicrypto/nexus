@@ -47,7 +47,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -488,7 +488,8 @@ async def evolve_skill_once(
     re-fenced) and ``after_score > before_score`` strictly.
     """
     from nexus_core.skills.manager import (
-        extract_durable_regions, reweave_durable,
+        extract_durable_regions,
+        reweave_durable,
     )
 
     # Score the current skill if the caller didn't precompute.
@@ -532,7 +533,7 @@ async def evolve_skill_once(
     for idx, edit in enumerate(proposals):
         candidate_editable = apply_edit(editable_body, edit)
         if candidate_editable is None:
-            reason = f"target_text not found in body"
+            reason = "target_text not found in body"
             rejected_this_round.append(f"edit#{idx}: {reason}")
             if skill_dir:
                 append_rejected(skill_dir, edit, reason)

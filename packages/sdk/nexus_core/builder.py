@@ -40,11 +40,10 @@ from typing import Optional
 from .core.backend import StorageBackend
 from .core.flush import FlushPolicy
 from .core.providers import AgentRuntime
-from .providers.session import SessionProviderImpl
 from .providers.artifact import ArtifactProviderImpl
-from .providers.task import TaskProviderImpl
 from .providers.impression import ImpressionProviderImpl
-
+from .providers.session import SessionProviderImpl
+from .providers.task import TaskProviderImpl
 
 # ── Module-level factory functions (the 80% surface) ──────────────────
 

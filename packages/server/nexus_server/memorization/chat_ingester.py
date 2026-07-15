@@ -44,16 +44,16 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
+from nexus_server.clinical_graph import (
+    ClinicalGraph,
+    ProvenanceRequired,
+    ensure_patient,
+)
 from nexus_server.event_sourcing import EventKind, Store
 from nexus_server.event_sourcing.handlers import (
     _h_ingestion_completed,
     _h_ingestion_llm_response,
     _h_ingestion_started,
-)
-from nexus_server.clinical_graph import (
-    ClinicalGraph,
-    ProvenanceRequired,
-    ensure_patient,
 )
 
 logger = logging.getLogger(__name__)

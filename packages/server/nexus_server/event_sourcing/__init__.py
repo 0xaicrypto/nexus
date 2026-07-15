@@ -45,27 +45,27 @@ Golden test
 """
 
 from nexus_server.event_sourcing.event_kinds import (
-    EventKind,
     EVENT_REGISTRY,
-    validate_payload,
+    EventKind,
     EventValidationError,
-)
-from nexus_server.event_sourcing.store import (
-    Store,
-    StoreError,
-    UnknownEventKindError,
-    ProvenanceRequiredError,
+    validate_payload,
 )
 from nexus_server.event_sourcing.replay import (
-    replay,
-    register_handler,
     REPLAY_HANDLERS,
+    register_handler,
+    replay,
 )
 from nexus_server.event_sourcing.schema import (
     CANONICAL_SCHEMA_DDL,
     PROJECTION_SCHEMA_DDL,
-    init_event_sourcing_schema,
     SCHEMA_VERSION,
+    init_event_sourcing_schema,
+)
+from nexus_server.event_sourcing.store import (
+    ProvenanceRequiredError,
+    Store,
+    StoreError,
+    UnknownEventKindError,
 )
 
 __all__ = [

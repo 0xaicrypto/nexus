@@ -9,8 +9,8 @@ Modules:
 """
 
 from .gossip import GossipProtocol
-from .profile import ProfileManager
 from .graph import SocialGraph
+from .profile import ProfileManager
 
 __all__ = [
     "GossipProtocol",

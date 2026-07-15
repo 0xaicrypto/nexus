@@ -15,23 +15,23 @@ M1.6 status: extractor is stub (deterministic; real LLM call later);
 distiller + composer are full implementations.
 """
 
+from nexus_server.practitioner.composer import (
+    PRACTITIONER_PROMPT_BUDGET_TOKENS,
+    build_prompt_enrichment,
+)
+from nexus_server.practitioner.distiller import (
+    N_THRESHOLDS,
+    DistillerResult,
+    distill,
+)
 from nexus_server.practitioner.extractor import (
     Candidate,
     extract_from_encounter,
     stub_practitioner_extractor,
 )
 from nexus_server.practitioner.heuristic_extractor import (
-    heuristic_practitioner_extractor,
     extract_from_user_text,
-)
-from nexus_server.practitioner.distiller import (
-    DistillerResult,
-    distill,
-    N_THRESHOLDS,
-)
-from nexus_server.practitioner.composer import (
-    build_prompt_enrichment,
-    PRACTITIONER_PROMPT_BUDGET_TOKENS,
+    heuristic_practitioner_extractor,
 )
 
 __all__ = [

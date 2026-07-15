@@ -35,10 +35,8 @@ by different upload types and share nothing but utility patterns.
 
 from __future__ import annotations
 
-import io
 import logging
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +203,6 @@ def transcode_to_jpeg(
         out["original_mode"] = img.mode
         # Multi-page detection (TIFF, GIF, animated WebP).
         try:
-            from PIL.Image import Image as _PILImage
             if hasattr(img, "n_frames"):
                 out["page_count"] = int(img.n_frames)
         except Exception as exc:  # noqa: BLE001

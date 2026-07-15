@@ -41,7 +41,7 @@
 
   /*
    * ─── Research Workspace tokens ─────────────────────────────────
-   * Extracted from docs/design/visual-mock/Research Workspace.dc.html.
+   * Extracted from the Research Workspace visual mock.
    * Lives under its own (rw-*) namespace so it can coexist with the
    * patient-side palette without clashes.
    *

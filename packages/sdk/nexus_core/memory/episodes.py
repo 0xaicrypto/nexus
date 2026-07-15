@@ -61,10 +61,8 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
-import re
-import time
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from ..versioned import VersionedStore
 

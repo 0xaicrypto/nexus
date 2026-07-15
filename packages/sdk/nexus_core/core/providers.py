@@ -30,10 +30,12 @@ from abc import ABC, abstractmethod
 from typing import Any, Optional
 
 from .models import (
-    Artifact, Checkpoint,
-    Impression, ImpressionSummary, NetworkStats,
+    Artifact,
+    Checkpoint,
+    Impression,
+    ImpressionSummary,
+    NetworkStats,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # Session Provider

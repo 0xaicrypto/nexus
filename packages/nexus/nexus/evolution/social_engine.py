@@ -17,18 +17,17 @@ from __future__ import annotations
 
 import json
 import logging
-import time
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from nexus_core import (
+    AgentProfile,
     AgentRuntime,
     GossipProtocol,
-    ProfileManager,
-    SocialGraph,
-    AgentProfile,
+    GossipSession,
     Impression,
     ImpressionDimensions,
-    GossipSession,
+    ProfileManager,
+    SocialGraph,
 )
 
 logger = logging.getLogger(__name__)

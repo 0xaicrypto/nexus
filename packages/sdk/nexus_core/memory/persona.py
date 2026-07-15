@@ -35,7 +35,7 @@ import dataclasses
 import logging
 import time
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..versioned import VersionedStore
 

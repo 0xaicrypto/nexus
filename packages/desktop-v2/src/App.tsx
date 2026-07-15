@@ -136,7 +136,7 @@ function ApiVersionBanner() {
 /**
  * Top-of-page 患者 | 研究 segmented control (decisions D1 + D14).
  * Defaults to 'research' on first launch. Tracks the visual mock at
- * docs/design/visual-mock/Research Workspace.dc.html.
+ * the Research Workspace visual mock.
  */
 function WorkspaceSwitcher() {
   const t     = useT();

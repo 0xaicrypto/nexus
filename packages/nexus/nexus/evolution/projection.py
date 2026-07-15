@@ -31,10 +31,10 @@ default stays ``single_call`` until quality dogfooding signs off.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Awaitable, Optional
+from typing import Awaitable, Callable, Optional
 
 from nexus_core.memory import EventLog
-from nexus_core.rlm import RLMRunner, RLMConfig
+from nexus_core.rlm import RLMConfig, RLMRunner
 
 logger = logging.getLogger(__name__)
 

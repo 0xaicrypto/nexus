@@ -49,7 +49,6 @@ from .base import BaseTool, ToolResult
 
 if TYPE_CHECKING:
     from ..skills import SkillManager
-    from .registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 

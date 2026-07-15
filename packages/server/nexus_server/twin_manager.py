@@ -392,8 +392,10 @@ async def _create_twin(user_id: str):
     # so they never trigger this branch).
     try:
         from nexus_server.files import (
-            resolve_file_text as _resolve_for_user,
             list_user_files as _list_for_user,
+        )
+        from nexus_server.files import (
+            resolve_file_text as _resolve_for_user,
         )
         if getattr(twin, "_file_reader", None) is not None:
             twin._file_reader._resolver = (
@@ -574,7 +576,6 @@ def start_reaper() -> tuple[asyncio.Task, asyncio.Event]:
 
 
 import re as _re
-
 
 # Pre-compiled regexes match the exact format strings in
 # nexus_core.backends.chain. If you change those format strings,

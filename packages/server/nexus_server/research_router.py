@@ -49,7 +49,7 @@ import uuid
 from typing import Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from nexus_server.auth import get_current_user
 from nexus_server.database import get_db_connection
@@ -1672,7 +1672,9 @@ async def install_starters(
     user_id: str = Depends(get_current_user),
 ) -> dict:
     from nexus_server.research.starter_protocols import (
-        STARTER_PROTOCOLS, install_starter, install_all_starters,
+        STARTER_PROTOCOLS,
+        install_all_starters,
+        install_starter,
     )
     installed: List[str] = []
     if req.starter_ids is None:

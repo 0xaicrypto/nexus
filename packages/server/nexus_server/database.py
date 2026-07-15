@@ -494,7 +494,7 @@ def init_db() -> None:
 
     # ── user_settings ───────────────────────────────────────────────
     # Persistent key/value store for LLM API keys + per-user prefs.
-    # Lives in rune_server.db (NOT the .env file) so:
+    # Lives in nexus_server.db (NOT the .env file) so:
     #   - Reinstalling Nexus.app keeps keys (db is at $RUNE_HOME/data
     #     or wherever DATABASE_URL points, both survive .app removal).
     #   - Upgrading the bundle keeps keys (same reason).
@@ -520,7 +520,7 @@ def init_db() -> None:
     )
 
     # ── Writing Studio (P1) ─────────────────────────────────────────
-    # See docs/design/WRITING_STUDIO_DESIGN.docx §3/§5/§6. Three tables:
+    # Writing Studio schema (P1). Three tables:
     #
     #   docs            — one row per document. ``body`` is a Markdown
     #                     subset where data references appear as

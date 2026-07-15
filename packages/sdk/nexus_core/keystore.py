@@ -25,10 +25,8 @@ Usage:
     info = ks.get_agent(agent_id=agent["agentId"])
 """
 
-import json
 import logging
-from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 logger = logging.getLogger("nexus_core.keystore")
 
@@ -68,8 +66,8 @@ class Keystore:
                          Defaults to ~/.bnbagent/wallets/
             debug: Enable verbose logging for contract calls.
         """
+        from bnbagent.erc8004 import AgentEndpoint, ERC8004Agent
         from bnbagent.wallets import EVMWalletProvider
-        from bnbagent.erc8004 import ERC8004Agent, AgentEndpoint
 
         self._AgentEndpoint = AgentEndpoint
 
@@ -317,9 +315,8 @@ class Keystore:
         Returns:
             StateManager in chain mode, ready for on-chain operations.
         """
+        from .chain import BSC_MAINNET_RPC, BSC_TESTNET_RPC, ERC8004_ADDRESSES
         from .state import StateManager
-
-        from .chain import BSC_TESTNET_RPC, BSC_MAINNET_RPC, ERC8004_ADDRESSES
 
         private_key = self.wallet.export_private_key()
         is_testnet = "testnet" in self._network

@@ -29,15 +29,13 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import uuid
 from typing import Any
 
 from nexus_core import AgentRuntime
-from nexus_core.memory import Fact, FactsStore, EventLog
 from nexus_core.evolution import EvolutionProposal
+from nexus_core.memory import EventLog, Fact, FactsStore
 from nexus_core.utils import robust_json_parse as _sdk_robust_json_parse
-from nexus_core.utils.json_parse import extract_balanced as _extract_balanced
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +170,8 @@ class MemoryEvolver:
             # Path uses a UUID suffix so each evolver gets a fresh
             # store — avoids cross-test pollution when several
             # MemoryEvolver instances share the same agent_id.
-            import tempfile, uuid as _uuid
+            import tempfile
+            import uuid as _uuid
             from pathlib import Path
             scratch = (
                 Path(tempfile.gettempdir())

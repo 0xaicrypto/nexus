@@ -65,6 +65,7 @@ max_sub_calls, timeout) — the goal is bounded cost, not security.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import dataclasses
@@ -73,7 +74,6 @@ import re
 import textwrap
 import time
 from typing import Any, Awaitable, Callable, Optional
-
 
 # ── Public types ──────────────────────────────────────────────────────
 

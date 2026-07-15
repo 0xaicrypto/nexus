@@ -18,8 +18,8 @@
 
 # Local SQLite + uploads + per-user twin state — these belong to the
 # DEPLOYED instance's /data volume, not the source tree.
-**/rune_server.db
-**/rune_server.db-*
+**/nexus_server.db
+**/nexus_server.db-*
 **/.nexus
 **/.nexus_server
 **/twins

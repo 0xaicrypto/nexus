@@ -30,9 +30,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Optional
 
-from .registry import AdapterRegistry
-
-
 # ─────────────────────────────────────────────────────────────────────
 # RuneCrewStorage — DELETED in Phase D 续 #2
 # ─────────────────────────────────────────────────────────────────────

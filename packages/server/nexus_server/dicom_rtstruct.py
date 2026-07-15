@@ -34,7 +34,6 @@ import sqlite3
 import time
 import uuid
 from io import BytesIO
-from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -66,13 +65,15 @@ def export_rtstruct_for_study(user_id: str, study_id: str) -> bytes:
     Raises ValueError when the study has no ROIs (nothing to
     export — caller should 400 rather than ship an empty file).
     """
-    import numpy as np
     import pydicom
     from pydicom.dataset import Dataset, FileDataset, FileMetaDataset
-    from pydicom.uid import (
-        RTStructureSetStorage, ExplicitVRLittleEndian, generate_uid,
-    )
     from pydicom.sequence import Sequence
+    from pydicom.uid import (
+        ExplicitVRLittleEndian,
+        RTStructureSetStorage,
+        generate_uid,
+    )
+
     from nexus_server.dicom import load_study
 
     study = load_study(user_id, study_id)
@@ -441,6 +442,7 @@ def import_rtstruct_bytes(
     Raises ValueError on malformed input.
     """
     import pydicom
+
     from nexus_server.dicom import load_study
 
     try:

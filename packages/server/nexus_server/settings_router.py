@@ -100,7 +100,7 @@ def _env_file() -> Path:
 # DB-backed persistence (the new source of truth)
 # ─────────────────────────────────────────────────────────────────────
 #
-# `user_settings` lives in rune_server.db and survives:
+# `user_settings` lives in nexus_server.db and survives:
 #   - re-install of Nexus.app (db is in user data dir, not the bundle)
 #   - upgrade of Nexus.app (same)
 #   - accidental `rm ~/Library/.../RuneProtocol/.env` (only the .env

@@ -26,12 +26,12 @@ this signals "we don't know yet, ask doctor or wait for more data".
 from __future__ import annotations
 
 import re
-import shlex
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from nexus_server.research.patient_facts import (
-    PATIENT_FACTS_SCHEMA, PatientFacts,
+    PATIENT_FACTS_SCHEMA,
+    PatientFacts,
 )
 
 
@@ -349,7 +349,7 @@ def _eval(node, facts: PatientFacts) -> Verdict:
     if op == "IS_NULL":
         return "pass" if v in (None, "", []) else "fail"
     if op == "IS_NOT_NULL":
-        return "pass" if not v in (None, "", []) else "fail"
+        return "pass" if v not in (None, "", []) else "fail"
     if op == "EXISTS":
         return "pass" if _present(facts, node.field) else "fail"
 

@@ -19,6 +19,6 @@ Usage:
     context = manager.get_prompt_context()
 """
 
-from .manager import SkillManager, InstalledSkill
+from .manager import InstalledSkill, SkillManager
 
 __all__ = ["SkillManager", "InstalledSkill"]

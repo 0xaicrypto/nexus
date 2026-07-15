@@ -45,12 +45,12 @@ import logging
 import re
 import time
 import uuid
-from collections import Counter
 from typing import Any, Optional
 
 from nexus_core import AgentRuntime
 from nexus_core.evolution import EvolutionProposal
 from nexus_core.memory import EventLog, LearnedSkill, SkillsStore
+
 from .memory_evolver import _robust_json_parse
 
 logger = logging.getLogger(__name__)

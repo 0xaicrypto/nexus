@@ -21,7 +21,7 @@ explained in terms of what it adds to the layer below.
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Server (packages/server, nexus_server)         — FastAPI / Python   │
 │    Multi-tenant HTTP frontend + clinical workflow engine.            │
-│    Persistence: rune_server.db (auth, patients, studies, DICOM,      │
+│    Persistence: nexus_server.db (auth, patients, studies, DICOM,      │
 │      event-sourcing graph, billing, async tasks, vector index)       │
 │      + per-user twin event_log SQLite under ~/.nexus_server/twins/.  │
 └──────┬───────────────────────────────────────┬───────────────────────┘
@@ -214,7 +214,7 @@ The legacy `/llm/chat` 9-step flow is documented inline in
 
 ## Where data lives
 
-Server-owned tables (all in `rune_server.db` under the configured
+Server-owned tables (all in `nexus_server.db` under the configured
 `DATABASE_URL`):
 
 | Concern | Where |

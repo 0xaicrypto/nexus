@@ -43,6 +43,8 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 
@@ -228,7 +230,6 @@ def _mask_to_polygon(mask: "np.ndarray") -> list[list[float]]:
     as [[x, y], ...] in original-image pixel coordinates. Empty
     list when the mask is empty.
     """
-    import numpy as np
     # Find boundary via skimage's contour finder. skimage is a
     # ~30 MB transitive dependency of many ML libs; if absent we
     # fall back to a simple "find non-zero pixel cluster bbox"

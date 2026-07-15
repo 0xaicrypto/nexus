@@ -12,10 +12,8 @@ Configure via environment variable:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from typing import Optional
 
 from .base import BaseTool, ToolResult
 

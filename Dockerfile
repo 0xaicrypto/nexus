@@ -105,7 +105,7 @@ WORKDIR /app
 
 # Persistent state lives under /data — this is the ONLY directory the
 # host needs to back up. Layout:
-#   /data/db/                — rune_server.db (SQLite)
+#   /data/db/                — nexus_server.db (SQLite)
 #   /data/twins/<user_id>/   — per-user event log, skills, persona, etc.
 #   /data/uploads/<user_id>/ — file uploads
 #   /data/cache/             — NEXUS_CACHE_DIR (chain identity, ABI cache)
@@ -117,7 +117,7 @@ VOLUME ["/data"]
 ENV NEXUS_TWIN_BASE_DIR=/data/twins \
     UPLOAD_DIR=/data/uploads \
     NEXUS_CACHE_DIR=/data/cache \
-    DATABASE_URL=sqlite:////data/db/rune_server.db \
+    DATABASE_URL=sqlite:////data/db/nexus_server.db \
     SERVER_HOST=0.0.0.0 \
     SERVER_PORT=8001
 

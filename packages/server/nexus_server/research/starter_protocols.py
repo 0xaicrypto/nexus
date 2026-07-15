@@ -19,8 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-import uuid
-from typing import Optional
 
 from nexus_server.database import get_db_connection
 from nexus_server.event_sourcing import EventKind, Store

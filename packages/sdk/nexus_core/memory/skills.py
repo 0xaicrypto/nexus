@@ -33,7 +33,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Iterable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..versioned import VersionedStore
 

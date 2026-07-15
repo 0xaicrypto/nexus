@@ -1,6 +1,6 @@
 """Writing Studio (P1) — contract tests.
 
-Covers (per WRITING_STUDIO_DESIGN.docx P1 scope):
+Covers P1 scope:
   * docs CRUD + per-user isolation
   * version snapshot on body-changing save + restore
   * @ patient reference → FROZEN de-identified snapshot (planted name

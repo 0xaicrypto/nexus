@@ -30,18 +30,17 @@ so one corrupt proposal can't block verdicts on the others.
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any, Optional, Protocol
 
 from nexus_core.evolution import (
+    DriftThresholds,
     EvolutionProposal,
     EvolutionRevert,
     EvolutionVerdict,
-    DriftThresholds,
     TaskKindPrediction,
     score_verdict,
 )
-from nexus_core.memory import EventLog, Event
+from nexus_core.memory import Event, EventLog
 
 logger = logging.getLogger("nexus.evolution.verdict_runner")
 

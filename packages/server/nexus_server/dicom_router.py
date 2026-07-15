@@ -21,21 +21,17 @@ medic can only touch their own studies.
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import sqlite3
 import time
 import uuid
-from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from nexus_server.auth import get_current_user
-
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/dicom", tags=["dicom"])
@@ -129,7 +125,7 @@ async def list_patients(
         logger.warning("[diag] init_patients_table failed: %s", _init_e)
 
     # F-merge-patients-db — `dicom_studies` stays in dicom_index.db,
-    # `patients` now lives in the SHARED rune_server.db. We can't JOIN
+    # `patients` now lives in the SHARED nexus_server.db. We can't JOIN
     # across SQLite files, so we open both connections and merge in
     # Python (same pattern as patients_router.list_patients_full).
     conn = _index_db()
@@ -239,7 +235,7 @@ async def list_patients(
     # F-archive-frontend — build a set of archived hashes so DICOM-
     # only patients (where the only signal that they're "archived"
     # is the patients table row) get filtered consistently.
-    # ``patients.archived_at`` is on the SHARED DB (rune_server.db),
+    # ``patients.archived_at`` is on the SHARED DB (nexus_server.db),
     # not dicom_index.db, so we open get_db_connection separately.
     archived_hashes: set[str] = set()
     if include == "active" or include == "archived":
@@ -555,7 +551,10 @@ async def render_endpoint(
     calls, ~50 ms per render).
     """
     from nexus_server.dicom import (
-        load_study, render_slice_png, render_mip_png, render_grid_png,
+        load_study,
+        render_grid_png,
+        render_mip_png,
+        render_slice_png,
     )
 
     study = load_study(current_user, study_id)
@@ -577,8 +576,9 @@ async def render_endpoint(
     # vs ~50 ms for live render.
     if kind == "slice" and wl is None and ww is None:
         try:
-            from nexus_server.dicom import find_study_by_upload, _index_db_path
             import sqlite3 as _sql
+
+            from nexus_server.dicom import _index_db_path
             conn = _sql.connect(_index_db_path())
             try:
                 row = conn.execute(

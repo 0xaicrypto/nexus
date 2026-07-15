@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from ..core.backend import StorageBackend
 from ..core.models import GossipMessage, GossipSession

@@ -26,7 +26,6 @@ CRITICAL safety rules baked in:
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import logging
 import os
@@ -37,8 +36,8 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from nexus_server.auth import get_current_user
 from nexus_server import config
+from nexus_server.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 

@@ -50,7 +50,6 @@ from typing import Optional
 
 from nexus_core.tools.base import BaseTool, ToolResult
 
-
 logger = logging.getLogger(__name__)
 
 

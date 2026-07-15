@@ -19,7 +19,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from nexus_server.auth import get_current_user
 from nexus_server.database import get_db_connection

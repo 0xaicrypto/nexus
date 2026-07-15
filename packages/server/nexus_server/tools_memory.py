@@ -320,7 +320,8 @@ class SemanticSearchTool(BaseTool):
 
         try:
             from nexus_server.vector_index import (
-                search_chunks, EmbeddingUnavailable,
+                EmbeddingUnavailable,
+                search_chunks,
             )
             hits = await search_chunks(
                 user_id=self._user_id,

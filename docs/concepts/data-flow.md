@@ -253,7 +253,7 @@ every few seconds) will pick up the resulting events as they land.
 
 | Stage | Where |
 |---|---|
-| Stage 1 (desktop) | `packages/desktop/RuneDesktop.UI/ViewModels/ChatViewModel.cs` |
+| Stage 1 (legacy Avalonia desktop) | `packages/desktop/RuneDesktop.UI/ViewModels/ChatViewModel.cs` (tag `legacy/avalonia-final`) |
 | Stage 2 (server route) | `packages/server/nexus_server/llm_gateway.py:llm_chat` |
 | Stage 2b (twin cold start) | `packages/server/nexus_server/twin_manager.py:_create_twin` |
 | Stage 3 (twin.chat 9 steps) | `packages/nexus/nexus/twin.py:chat` |

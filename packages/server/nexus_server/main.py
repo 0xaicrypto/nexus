@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+
 # Load .env before anything reads os.getenv.
 #
 # Lookup order (first to set a key wins; later files only fill blanks):
@@ -115,10 +116,18 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from nexus_server import (
-    agent_state, auth, billing_routes, chain_proxy, files, llm_gateway,
-    sessions_router, thinking_stream, user_profile,
+    agent_state,
+    auth,
+    billing_routes,
+    chain_proxy,
+    files,
+    llm_gateway,
+    sessions_router,
+    thinking_stream,
+    user_profile,
     workflows_router,
 )
+
 # Phase B: ``sync_hub`` is gone (raises ImportError). /sync/push and
 # /sync/pull retired after Round 2 made the desktop a thin client.
 from nexus_server.config import get_config
@@ -146,6 +155,7 @@ def _gc_soft_deleted_identities() -> None:
     """
     import sqlite3
     from datetime import datetime, timedelta, timezone
+
     from nexus_server.database import get_db_connection
 
     cutoff = (datetime.now(timezone.utc)
@@ -292,8 +302,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         _crash_dump_path = None
 
     def _dump_startup_failure(stage: str, exc: BaseException) -> None:
-        import traceback as _tb
         import datetime as _dt
+        import traceback as _tb
         if _crash_dump_path is None:
             return
         try:
@@ -446,6 +456,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # retention. Snapshot files land in ~/Documents/Nexus Archive/.
     try:
         import pathlib as _pl
+
         from nexus_server.persistence import start_snapshot_scheduler
         _db_path = _pl.Path(config.DATABASE_URL.replace("sqlite:///", ""))
         if _db_path.exists():
@@ -664,7 +675,10 @@ def create_app() -> FastAPI:
     async def build_info():
         try:
             from nexus_server.__build_info__ import (
-                BUILD_ID, BUILD_TIME, GIT_SHA, VERSION,
+                BUILD_ID,
+                BUILD_TIME,
+                GIT_SHA,
+                VERSION,
             )
         except Exception:
             BUILD_ID = BUILD_TIME = GIT_SHA = VERSION = "unknown"
@@ -803,8 +817,7 @@ def create_app() -> FastAPI:
     app.include_router(_research_router.patients_studies_router)
     # Writing Studio (P1) — /api/v1/docs/*: documents, version
     # snapshots, de-identified data reference chips, selection polish
-    # (SSE), PHI scan and the docx export gate. See
-    # docs/design/WRITING_STUDIO_DESIGN.docx.
+    # (SSE), PHI scan and the docx export gate.
     from nexus_server import writing_router as _writing_router
     app.include_router(_writing_router.router)
     # Skills management — /api/v1/skills: list / search / install /
@@ -824,6 +837,7 @@ def create_app() -> FastAPI:
     # via fetch(). Mounting static is the simplest deploy — no
     # WebView packaging, no extra runtime, no .NET 10 compat risk.
     from pathlib import Path as _Path
+
     from fastapi.staticfiles import StaticFiles as _StaticFiles
     _static_dir = _Path(__file__).parent / "static"
     if _static_dir.is_dir():

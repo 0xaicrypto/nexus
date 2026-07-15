@@ -46,9 +46,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from nexus_server.auth import get_current_user

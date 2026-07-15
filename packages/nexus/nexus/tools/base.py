@@ -7,11 +7,12 @@ This module adds MCP server integration for Nexus.
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Optional
+
+from nexus_core.mcp import MCPManager, MCPServerConfig
 
 # Import everything from SDK
-from nexus_core.tools import BaseTool, ToolResult, ToolCall, ToolRegistry
-from nexus_core.mcp import MCPManager, MCPServerConfig, MCPTool
+from nexus_core.tools import ToolCall, ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 

@@ -17,6 +17,7 @@ Override: FlushPolicy.sync_every() for legacy every-event behavior.
 
 import hashlib
 import json
+import logging
 import time
 import uuid
 from typing import Any, Optional
@@ -29,8 +30,10 @@ from google.adk.sessions.base_session_service import (
     ListSessionsResponse,
 )
 
+from .flush import FlushBuffer, FlushPolicy, WriteAheadLog
 from .state import StateManager
-from .flush import FlushPolicy, FlushBuffer, WriteAheadLog
+
+logger = logging.getLogger(__name__)
 
 
 class BNBChainSessionService(BaseSessionService):

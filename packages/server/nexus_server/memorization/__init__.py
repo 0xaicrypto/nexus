@@ -14,21 +14,21 @@ Modules:
 
 from nexus_server.memorization.chat_ingester import (
     ChatIngester,
-    QuoteVerificationError,
     ExtractionResult,
+    QuoteVerificationError,
     StructuredEntity,
 )
 from nexus_server.memorization.dicom_ingester import (
     DicomIngester,
     DicomIngestError,
-    RedactionRequired,
-    UnsupportedModality,
-    StudyInput,
     KeySliceInput,
+    RedactionRequired,
     RedactionResult,
+    StudyInput,
+    UnsupportedModality,
+    make_test_study,
     route_modality,
     stub_redactor,
-    make_test_study,
 )
 
 __all__ = [

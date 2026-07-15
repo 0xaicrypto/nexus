@@ -38,7 +38,7 @@ import logging
 import sqlite3
 from typing import Any, Callable
 
-from nexus_server.event_sourcing.event_kinds import EventKind, EVENT_REGISTRY
+from nexus_server.event_sourcing.event_kinds import EVENT_REGISTRY, EventKind
 from nexus_server.event_sourcing.schema import drop_projections, init_event_sourcing_schema
 
 logger = logging.getLogger(__name__)
@@ -210,7 +210,10 @@ def full_rebuild(conn: sqlite3.Connection) -> int:
 # Kept at bottom so symbols defined above are available to handlers.
 # ─────────────────────────────────────────────────────────────────────
 
-from nexus_server.event_sourcing import handlers as _handlers  # noqa: E402, F401  (side-effect: registers handlers)
+from nexus_server.event_sourcing import (
+    handlers as _handlers,  # noqa: E402, F401  (side-effect: registers handlers)
+)
+
 _ = _handlers  # silence unused-import lints; the import is the registration
 
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Optional
+from typing import Optional
 
 
 class StorageBackend(ABC):

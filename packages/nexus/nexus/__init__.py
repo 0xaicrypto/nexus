@@ -21,14 +21,15 @@ split. The legacy submodule shims (``nexus.tools.web_search``,
 import those directly from ``nexus_core.*``.
 """
 
-from .twin import DigitalTwin
-from .config import TwinConfig, LLMProvider
-from .tools import ExtendedToolRegistry
-
-# Re-export SDK classes for convenience
-from nexus_core.tools import BaseTool, ToolResult, ToolCall, ToolRegistry
 from nexus_core.mcp import MCPManager, MCPServerConfig
 from nexus_core.skills import SkillManager
+
+# Re-export SDK classes for convenience
+from nexus_core.tools import BaseTool, ToolCall, ToolRegistry, ToolResult
+
+from .config import LLMProvider, TwinConfig
+from .tools import ExtendedToolRegistry
+from .twin import DigitalTwin
 
 __version__ = "0.1.0"
 __all__ = [

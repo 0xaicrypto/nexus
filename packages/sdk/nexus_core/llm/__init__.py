@@ -2,9 +2,9 @@
 
 from .client import LLMClient
 from .providers import (
-    LLMProvider,
     KIMI_DEFAULT_BASE_URL,
     KIMI_DEFAULT_MODEL,
+    LLMProvider,
     resolve_kimi_api_key,
     resolve_kimi_base_url,
 )

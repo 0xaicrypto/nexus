@@ -29,8 +29,8 @@ import sqlite3
 import time
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, asdict, field
-from typing import Optional, Literal
+from dataclasses import asdict, dataclass, field
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ def pubmed_search(query: str, *, top_k: int = 10,
     # 2. ESummary — titles, authors, venue, year, DOI
     esummary = (
         "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?"
-        f"db=pubmed&retmode=json&id=" + ",".join(ids)
+        "db=pubmed&retmode=json&id=" + ",".join(ids)
     )
     raw2 = _http_get(esummary)
     if not raw2:

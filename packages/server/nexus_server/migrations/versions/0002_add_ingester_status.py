@@ -26,7 +26,6 @@ DBs that already have them.
 from __future__ import annotations
 
 from alembic import op
-import sqlalchemy as sa
 
 revision = "0002"
 down_revision = "0001"

@@ -1,6 +1,6 @@
 """Writing Studio HTTP surface (P1 MVP).
 
-See docs/design/WRITING_STUDIO_DESIGN.docx. Implements the server side
+Implements the server side
 of the in-app writing mode: documents + version snapshots + data
 reference chips (auto de-identified at insert time) + selection polish
 (SSE) + PHI scan + docx export gated on PHI resolution.
@@ -937,7 +937,9 @@ async def create_reference(
         # row is the projection; the event is the medico-legal record.
         try:
             from nexus_server.event_sourcing import (
-                EventKind, Store, init_event_sourcing_schema,
+                EventKind,
+                Store,
+                init_event_sourcing_schema,
             )
             init_event_sourcing_schema(conn)
             store = Store(conn)
@@ -1327,7 +1329,8 @@ async def doc_chat(
                     if p.is_file():
                         raw = p.read_bytes()
                         from nexus_server.files import (
-                            _bytes_to_text, _save_extracted_text,
+                            _bytes_to_text,
+                            _save_extracted_text,
                         )
                         text_out = _bytes_to_text(raw, a_name, a_mime)
                         if text_out:

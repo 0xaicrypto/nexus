@@ -15,7 +15,7 @@ members = [
     "nexus",
     "nexus-core",
     "nexus-server",
-    "rune-protocol",
+    "nexus-workspace",
 ]
 
 [[package]]
@@ -5618,7 +5618,7 @@ wheels = [
 ]
 
 [[package]]
-name = "rune-protocol"
+name = "nexus-workspace"
 version = "0.1.0"
 source = { virtual = "." }
 

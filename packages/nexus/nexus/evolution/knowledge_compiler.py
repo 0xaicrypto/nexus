@@ -22,7 +22,6 @@ artifact to keep in sync.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
 import uuid
@@ -31,6 +30,7 @@ from typing import Any, Optional
 from nexus_core import AgentRuntime
 from nexus_core.evolution import EvolutionProposal
 from nexus_core.memory import EventLog, FactsStore, KnowledgeArticle, KnowledgeStore
+
 from .memory_evolver import _robust_json_parse
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,8 @@ class KnowledgeCompiler:
             # scratch store under tempdir when the caller doesn't
             # pass one (tests / standalone use). DigitalTwin always
             # wires the real, chain-mirrored one in production.
-            import tempfile, uuid as _uuid
+            import tempfile
+            import uuid as _uuid
             from pathlib import Path
             scratch = (
                 Path(tempfile.gettempdir())
@@ -123,7 +124,8 @@ class KnowledgeCompiler:
             # clustering. Auto-synthesise a scratch FactsStore so
             # tests can construct without wiring (DigitalTwin wires
             # the real one in production).
-            import tempfile, uuid as _uuid
+            import tempfile
+            import uuid as _uuid
             from pathlib import Path
             scratch = (
                 Path(tempfile.gettempdir())

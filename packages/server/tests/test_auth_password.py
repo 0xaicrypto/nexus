@@ -176,10 +176,10 @@ def test_claim_flow(client):
     assert _error_code(r2) == "already_claimed"
 
 
-def test_claim_unknown_user_404(client):
+def test_claim_unknown_user_401(client):
     r = client.post("/api/v1/auth/claim",
                     json={"username": "ghost", "password": PW})
-    assert r.status_code == 404
+    assert r.status_code == 401
 
 
 def test_claim_on_password_account_409(client):

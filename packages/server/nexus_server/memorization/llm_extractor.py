@@ -21,7 +21,9 @@ import unicodedata
 from typing import Any
 
 from nexus_server.memorization.chat_ingester import (
-    ExtractionResult, Extractor, StructuredEntity,
+    ExtractionResult,
+    Extractor,
+    StructuredEntity,
 )
 
 logger = logging.getLogger(__name__)

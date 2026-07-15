@@ -15,8 +15,8 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Optional
 
-from ..core.providers import ImpressionProvider
 from ..core.models import AgentProfile, ImpressionSummary, NetworkStats
+from ..core.providers import ImpressionProvider
 
 
 class SocialGraph:

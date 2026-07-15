@@ -142,7 +142,7 @@ class EventKind(str, Enum):
     STUDY_REPORT_GENERATED             = "study_report_generated"
 
     # ─ Writing Studio (P1) ─────────────────────────────────────────
-    # See docs/design/WRITING_STUDIO_DESIGN.docx §4.2/§5. Emitted every
+    # Emitted every
     # time a medic inserts a data-reference chip into a document —
     # "who, when, in which doc, referenced which patient's/study's/
     # file's which slice of data". Audit-only: the doc_references

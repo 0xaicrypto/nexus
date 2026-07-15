@@ -1,7 +1,7 @@
 /**
  * Research Workspace UI — dark theme · 中文 · 全 7 tab
  *
- * Visual source of truth: docs/design/visual-mock/Research Workspace.dc.html
+ * Visual source of truth: the Research Workspace design spec.
  * Design tokens live in src/index.css (`--rw-*`) + tailwind.config.ts (`rw.*`).
  *
  * Decisions baked in:
@@ -2295,8 +2295,8 @@ function NewStudyDocxPane(props: {
       };
       // Auto-name from LLM-extracted study_title / short_code / phase
       // / primary_endpoint, but ONLY when the medic hasn't typed
-      // something themselves. Showing "TEST_PROTOCOL_NSCLC_PD1" as the
-      // study name (the filename stem) was wrong UX — the protocol
+      // something themselves. Showing the raw protocol filename stem as the
+      // study name was wrong UX — the protocol
       // already has a real human-readable name inside.
       if (!name && (draft.study_title || '').trim()) {
         setName((draft.study_title || '').trim());

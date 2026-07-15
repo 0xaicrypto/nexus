@@ -6,8 +6,13 @@ When the LLM returns tool calls (web search, URL read, file generate),
 the server executes them and feeds results back until a final text response.
 """
 
+# #113: contextvar so provider-call helpers can read the calling
+# user_id without threading it through every function signature.
+# Twin chat handlers set this at turn-start; delegate sub-agents
+# inherit it via the same async context. None when there's no
+# authenticated caller (tests, dev runs) — usage metering bails.
+import contextvars as _cv
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -15,12 +20,6 @@ from pydantic import BaseModel, Field
 
 from nexus_server.auth import get_current_user
 
-# #113: contextvar so provider-call helpers can read the calling
-# user_id without threading it through every function signature.
-# Twin chat handlers set this at turn-start; delegate sub-agents
-# inherit it via the same async context. None when there's no
-# authenticated caller (tests, dev runs) — usage metering bails.
-import contextvars as _cv
 _current_user_var: _cv.ContextVar[Optional[str]] = _cv.ContextVar(
     "nexus_current_user", default=None,
 )
@@ -438,11 +437,14 @@ def _maybe_rewrite_dicom_to_png(att: "Attachment") -> "Attachment":
     # bad upload to kill the chat turn.
     try:
         import io as _io
+
         import pydicom
-        import numpy as _np
         from PIL import Image as _Image
+
         from nexus_server.dicom import (
-            _hu_array, _window_to_uint8, _resolve_window,
+            _hu_array,
+            _resolve_window,
+            _window_to_uint8,
         )
 
         ds = pydicom.dcmread(_io.BytesIO(raw))
@@ -557,7 +559,8 @@ def _maybe_rewrite_dicom_archive_to_pngs(
             # + study timeline BEFORE looking at the images.
             try:
                 from nexus_server.dicom import (
-                    find_study_by_upload, get_patient_context_block,
+                    find_study_by_upload,
+                    get_patient_context_block,
                 )
                 bound = find_study_by_upload(user_id, att.file_id or "")
                 if bound is not None:
@@ -619,8 +622,9 @@ def _maybe_rewrite_dicom_archive_to_pngs(
         # medical in-flight stub for files that ARE DICOM.
         looks_dicom_here = False
         try:
-            from nexus_server.dicom import looks_like_dicom_archive
             from pathlib import Path as _Path
+
+            from nexus_server.dicom import looks_like_dicom_archive
             if disk_path and _Path(disk_path).exists():
                 looks_dicom_here = looks_like_dicom_archive(_Path(disk_path))
         except Exception as exc:
@@ -742,9 +746,12 @@ def _maybe_rewrite_dicom_archive_to_pngs(
 
     try:
         from nexus_server.dicom import (
-            looks_like_dicom_archive, parse_dicom_archive,
-            render_mip_png, render_slice_png, render_grid_png,
+            looks_like_dicom_archive,
+            parse_dicom_archive,
             persist_study,
+            render_grid_png,
+            render_mip_png,
+            render_slice_png,
         )
     except ImportError:
         return [att]
@@ -796,9 +803,9 @@ def _maybe_rewrite_dicom_archive_to_pngs(
             return [stub]
         return [att]
 
-    import tempfile
-    import shutil
     import base64 as _b64
+    import shutil
+    import tempfile
     tmp = _Path(tempfile.mkdtemp(prefix="nexus-dicom-render-"))
     try:
         study = parse_dicom_archive(zip_path, tmp)
@@ -932,7 +939,8 @@ async def _build_related_context_block(
 
     try:
         from nexus_server.vector_index import (
-            search_chunks, EmbeddingUnavailable,
+            EmbeddingUnavailable,
+            search_chunks,
         )
     except ImportError:
         return ""
@@ -1402,7 +1410,9 @@ async def call_llm(
     ``MAX_AUTO_CONTINUATIONS`` to keep token cost predictable.
     """
     from nexus_core.llm.client import (
-        MAX_AUTO_CONTINUATIONS, _TRUNCATION_MARKER, _CONTINUATION_NUDGE,
+        _CONTINUATION_NUDGE,
+        _TRUNCATION_MARKER,
+        MAX_AUTO_CONTINUATIONS,
     )
 
     model = model or config.DEFAULT_LLM_MODEL
@@ -1573,7 +1583,8 @@ async def call_gemini(messages, system_prompt, model, temperature, max_tokens, t
         # half-sentence reply. Same _is_max_tokens_truncation helper
         # the SDK uses; import lazily to keep gateway boot cheap.
         from nexus_core.llm.client import (
-            _is_max_tokens_truncation, _TRUNCATION_MARKER,
+            _TRUNCATION_MARKER,
+            _is_max_tokens_truncation,
         )
         finish_reason = None
         if response.candidates:
@@ -1756,7 +1767,8 @@ async def _call_openai_compatible(
         stop_reason = "tool_calls" if tool_calls else (choice.finish_reason or "stop")
         if not tool_calls:
             from nexus_core.llm.client import (
-                _is_max_tokens_truncation, _TRUNCATION_MARKER,
+                _TRUNCATION_MARKER,
+                _is_max_tokens_truncation,
             )
             if _is_max_tokens_truncation(choice.finish_reason):
                 logger.warning(
@@ -1812,7 +1824,8 @@ async def call_anthropic(messages, system_prompt, model, temperature, max_tokens
         stop_reason = "tool_calls" if tool_calls else (response.stop_reason or "stop")
         if not tool_calls:
             from nexus_core.llm.client import (
-                _is_max_tokens_truncation, _TRUNCATION_MARKER,
+                _TRUNCATION_MARKER,
+                _is_max_tokens_truncation,
             )
             if _is_max_tokens_truncation(response.stop_reason):
                 logger.warning(
@@ -1868,10 +1881,11 @@ async def llm_chat(
     # AND lets future turns reference these files even if not re-attached).
     summaries: list[AttachmentSummary] = []
     if request.attachments:
-        from nexus_server.attachment_distiller import (
-            distill_attachment, distill_image,
-        )
         from nexus_server import files as files_mod
+        from nexus_server.attachment_distiller import (
+            distill_attachment,
+            distill_image,
+        )
 
         # Resolve any attachments that reference uploaded files by id —
         # thin-client path. We swap content_base64 in for downstream
@@ -2506,6 +2520,7 @@ async def llm_chat(
                 recent_task_id = ""
                 try:
                     import time as _time
+
                     from nexus_server.async_tasks import list_user_tasks
                     recent = list_user_tasks(current_user, limit=5)
                     cutoff = _time.time() - 30   # last 30s

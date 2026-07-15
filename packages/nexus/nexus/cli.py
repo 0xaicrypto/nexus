@@ -370,7 +370,7 @@ async def main_loop(args):
                 print_response(response, name)
 
             except Exception as e:
-                print(f"\r")
+                print("\r")
                 print_error(str(e))
                 if args.verbose:
                     import traceback

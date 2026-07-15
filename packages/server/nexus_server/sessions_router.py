@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 from nexus_server import sessions
 from nexus_server.auth import get_current_user

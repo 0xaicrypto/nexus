@@ -1,6 +1,6 @@
 # End-to-End 测试用例 · Research-first 临床工作流
 
-> 假设环境:刚 build 完的 `.dmg`,数据库**全新空**(本轮清干净了 `rune_server.db` 和 `~/.nexus_server/`)。
+> 假设环境:刚 build 完的 `.dmg`,数据库**全新空**(本轮清干净了 `nexus_server.db` 和 `~/.nexus_server/`)。
 > 测试时间约 30–45 分钟。每个步骤后面有"✅ 预期"和"❌ 如果发现"两栏。
 
 ---

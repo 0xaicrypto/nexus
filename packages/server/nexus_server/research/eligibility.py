@@ -19,14 +19,16 @@ import json
 import logging
 import sqlite3
 import time
-from dataclasses import dataclass, asdict
-from typing import Any, Optional
+from dataclasses import asdict, dataclass
+from typing import Optional
 
 from nexus_server.database import get_db_connection
 from nexus_server.event_sourcing import EventKind, Store
 from nexus_server.research import rule_dsl
 from nexus_server.research.patient_facts import (
-    PatientFacts, get_patient_facts, list_known_patient_hashes,
+    PatientFacts,
+    get_patient_facts,
+    list_known_patient_hashes,
 )
 
 logger = logging.getLogger(__name__)

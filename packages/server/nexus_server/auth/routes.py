@@ -604,7 +604,6 @@ class IdentityInfo(BaseModel):
 def _identity_file_path():
     """Resolve $RUNE_HOME/identity.json. Late-import to avoid circular
     dep with settings_router."""
-    from pathlib import Path
     from nexus_server.settings_router import _rune_home
     rune_home = _rune_home()
     rune_home.mkdir(parents=True, exist_ok=True)

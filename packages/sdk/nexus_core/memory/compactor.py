@@ -25,10 +25,10 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import Callable, Awaitable, Optional
+from typing import Awaitable, Callable
 
-from .event_log import EventLog
 from .curated import CuratedMemory
+from .event_log import EventLog
 
 logger = logging.getLogger(__name__)
 

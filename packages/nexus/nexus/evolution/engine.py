@@ -9,13 +9,18 @@ from typing import Any
 
 from nexus_core import AgentRuntime
 from nexus_core.memory import (
-    FactsStore, EventLog, PersonaStore, SkillsStore, KnowledgeStore,
+    EventLog,
+    FactsStore,
+    KnowledgeStore,
+    PersonaStore,
+    SkillsStore,
 )
-from .memory_evolver import MemoryEvolver
-from .skill_evolver import SkillEvolver
-from .skill_evaluator import SkillEvaluator
-from .persona_evolver import PersonaEvolver
+
 from .knowledge_compiler import KnowledgeCompiler
+from .memory_evolver import MemoryEvolver
+from .persona_evolver import PersonaEvolver
+from .skill_evaluator import SkillEvaluator
+from .skill_evolver import SkillEvolver
 from .social_engine import SocialEngine
 
 logger = logging.getLogger(__name__)

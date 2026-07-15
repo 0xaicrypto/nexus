@@ -16,9 +16,9 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from nexus_server import scheduler, schedule_intent
+from nexus_server import schedule_intent, scheduler
 from nexus_server.auth import get_current_user
 from nexus_server.database import get_db_connection
 from nexus_server.event_sourcing import EventKind, Store

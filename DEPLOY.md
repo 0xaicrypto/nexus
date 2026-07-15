@@ -129,7 +129,7 @@ The first user to register on the remote becomes their own agent.
 
 Docker volumes (host paths shown by `docker volume inspect`):
   nexus-data        ← /data inside the container
-    ├── db/                   # rune_server.db (SQLite)
+    ├── db/                   # nexus_server.db (SQLite)
     ├── twins/<user_id>/      # per-user EventLog, persona, skills, etc
     ├── uploads/<user_id>/    # uploaded files
     └── cache/                # chain identity cache, ABI cache

@@ -33,7 +33,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from ..versioned import VersionedStore
 

@@ -21,7 +21,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import nexus_core
 from nexus_core import AgentRuntime, Checkpoint, LLMClient, LLMProvider, ThinkingEmitter
@@ -87,9 +87,14 @@ class DigitalTwin:
 
         # DPM: Event log (append-only, SDK layer) + Projection (Nexus layer)
         from nexus_core.memory import (
-            EventLog, CuratedMemory, EventLogCompactor,
-            Episode, EpisodesStore, FactsStore, SkillsStore,
-            PersonaStore, KnowledgeStore,
+            CuratedMemory,
+            Episode,
+            EpisodesStore,
+            EventLog,
+            FactsStore,
+            KnowledgeStore,
+            PersonaStore,
+            SkillsStore,
         )
         # Stash the dataclass on the instance so _upsert_active_episode
         # can use it without re-importing every turn.
@@ -128,7 +133,7 @@ class DigitalTwin:
         self._compactor = None
 
         # ABC: Contract enforcement engine
-        from nexus_core.contracts import ContractEngine, ContractSpec, DriftScore, Rule
+        from nexus_core.contracts import ContractEngine, ContractSpec, DriftScore
         contract_path = Path(config.base_dir) / "contracts" / "system.yaml"
         user_rules_path = Path(config.base_dir) / "contracts" / "user_rules.json"
         self._contract_spec = ContractSpec.from_yaml(contract_path) if contract_path.exists() else ContractSpec()
@@ -381,9 +386,10 @@ class DigitalTwin:
         # the canonical single-call DPM projection and the
         # RLM-style runtime navigation. Default stays single_call —
         # rlm is opt-in until dogfooding signs off.
-        from .evolution.projection import ProjectionMemory
         from nexus_core.memory import EventLogCompactor
         from nexus_core.rlm import RLMConfig
+
+        from .evolution.projection import ProjectionMemory
 
         proj_mode = getattr(self.config, "chat_projection_mode", "single_call")
         proj_kwargs: dict = {"mode": proj_mode}
@@ -494,8 +500,8 @@ class DigitalTwin:
         Missing dependencies are logged but don't prevent startup.
         """
         try:
-            from nexus_core.tools.web_search import WebSearchTool
             from nexus_core.tools.url_reader import URLReaderTool
+            from nexus_core.tools.web_search import WebSearchTool
 
             tavily_key = tavily_api_key or os.environ.get("TAVILY_API_KEY", "")
             jina_key = jina_api_key or os.environ.get("JINA_API_KEY", "")
@@ -522,7 +528,7 @@ class DigitalTwin:
             # wrap the existing SkillManager API as function-calling
             # entries.
             try:
-                from nexus_core.tools import SkillInstallerTool, McpInstallerTool
+                from nexus_core.tools import McpInstallerTool, SkillInstallerTool
                 self.tools.register(SkillInstallerTool(self.skills))
                 self.tools.register(
                     McpInstallerTool(self.skills, tool_registry=self.tools),

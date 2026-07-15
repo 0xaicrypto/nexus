@@ -304,8 +304,8 @@ def _extract_docx_text(raw: bytes) -> str:
 
     # ── Path 2: stdlib zipfile + xml.etree ─────────────────────────
     try:
-        import zipfile
         import xml.etree.ElementTree as ET
+        import zipfile
 
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
             try:

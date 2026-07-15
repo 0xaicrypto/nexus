@@ -53,7 +53,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from .core.backend import StorageBackend

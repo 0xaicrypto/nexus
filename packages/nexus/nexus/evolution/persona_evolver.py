@@ -21,8 +21,8 @@ import uuid
 from typing import Any
 
 from nexus_core import AgentRuntime
-from nexus_core.memory import EventLog, PersonaStore, PersonaVersion
 from nexus_core.evolution import EvolutionProposal
+from nexus_core.memory import EventLog, PersonaStore, PersonaVersion
 
 logger = logging.getLogger(__name__)
 

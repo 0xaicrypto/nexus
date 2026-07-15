@@ -21,15 +21,14 @@ On-chain mapping:
 
 import json
 import logging
-import time
 from typing import Optional
 
+from a2a.server.request_handlers.request_handler import ServerCallContext
 from a2a.server.tasks.task_store import TaskStore
 from a2a.types import Task, TaskState
-from a2a.server.request_handlers.request_handler import ServerCallContext
 
-from nexus_core.state import StateManager
 from nexus_core.flush import FlushPolicy
+from nexus_core.state import StateManager
 
 logger = logging.getLogger("nexus_core.a2a_task_store")
 
@@ -160,7 +159,6 @@ class BNBChainTaskStore(TaskStore):
         if not task.artifacts:
             return
 
-        import hashlib as _hl
 
         for artifact in task.artifacts:
             # Extract name and data from the A2A Artifact

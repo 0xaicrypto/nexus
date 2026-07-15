@@ -5,25 +5,6 @@ the Research Workspace UI. It supersedes any ad-hoc sketches in the
 main design doc (`docs/design/RESEARCH_WORKSPACE_DESIGN.md`) for
 visual decisions: typography, palette, spacing, component composition.
 
-## Files
-
-| File | Purpose |
-|------|---------|
-| `Research Workspace.dc.html` | Interactive React-state mockup. Open in any browser. |
-| `support.js` | Doodle Cards runtime. Bundled together with the .html. |
-| `fonts/SpaceGrotesk-VariableFont_wght.ttf` | Display font (used in the mock + the real app). |
-| `thumbnail.webp` | One-shot preview image. |
-
-## How to view
-
-```bash
-open "Research Workspace.dc.html"
-# or open in any modern browser; no server needed.
-```
-
-Click around — most interactions (tab switches, candidate cards,
-invite modal, visit checklist, focus chip in chat) are wired up.
-
 ## How this maps to code
 
 (Verified against `packages/desktop-v2/src/` as of the most recent

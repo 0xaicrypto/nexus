@@ -38,7 +38,6 @@ from typing import Any
 from ..core.backend import StorageBackend
 from ..memory.facts import Fact, FactsStore
 
-
 logger = logging.getLogger("nexus_core.migrations.memory_to_facts")
 
 

@@ -50,7 +50,6 @@ import platform
 import shutil
 import smtplib
 import ssl
-import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import quote

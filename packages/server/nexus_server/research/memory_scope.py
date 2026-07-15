@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from typing import Optional, Iterable
+from typing import Iterable, Optional
 
 logger = logging.getLogger(__name__)
 

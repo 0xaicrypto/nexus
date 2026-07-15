@@ -54,7 +54,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from nexus_server import sessions
 from nexus_server.database import get_db_connection
 
 logger = logging.getLogger(__name__)
