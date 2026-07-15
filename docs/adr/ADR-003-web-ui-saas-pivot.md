@@ -113,6 +113,28 @@ app.mount("/", StaticFiles(directory="/app/packages/web/dist", html=True), name=
 - SPA fallback: any unknown path returns `index.html` so React Router handles deep links.
 - During local development, Vite dev server proxies `/api` to the running backend.
 
+### Routing structure
+
+| Route | Purpose | Auth required |
+|-------|---------|---------------|
+| `/` | Marketing landing page | No |
+| `/login` | Login / register | No (redirects to `/app` if already logged in) |
+| `/app` | Main application shell | Yes |
+| `/app/chat` | Chat interface | Yes |
+| `/app/settings` | Settings · LLM, billing, profile | Yes |
+| `/app/modes/*` | Imaging, Writing, Memory, etc. | Yes |
+
+The React Router configuration owns these routes; FastAPI only needs the SPA fallback.
+
+### Self-hosted support
+
+Because the web UI is served from the same origin as the API:
+
+- The web build uses **relative API paths** (`/api/v1`, `/auth`). No hard-coded SaaS domain.
+- A self-hosted user only needs to set `HOSTNAME` and run `docker compose up`; the web UI automatically points at their own backend.
+- Optional runtime config: a small `/api/v1/config` endpoint can expose safe, non-secret instance metadata (instance name, default provider, billing enabled). The web app fetches this on boot to customize branding.
+- Build-time config (logo, app name, primary color) can be injected via environment variables passed to the Node build stage in the Dockerfile.
+
 ### Docker / deployment changes
 
 1. Multi-stage Dockerfile:
@@ -146,12 +168,12 @@ For each phase, copy/adapt the relevant TypeScript code from `desktop-v2/src/` i
 | JWT in localStorage is XSS-vulnerable | Medium | Accept for M0; migrate to `httpOnly` cookies or short-lived tokens later. |
 | CORS mismatch between dev and prod | Low | Use relative API paths; backend allows explicit origins. |
 
-## Open questions
+## Decisions on open questions
 
-1. Should the web UI support self-hosted deployment out of the box, or is it SaaS-only at first?
-2. Do we want a marketing landing page at `/` and the app at `/app`, or is the app at `/` behind login?
-3. Should we keep the React code in `desktop-v2` as the source of truth and publish it as both Tauri and web, or fork it into `packages/web`?
-4. What is the target browser baseline? (Recommendation: evergreen Chrome/Safari/Firefox; no IE11.)
+1. **Self-hosted deployment is supported from day one.** The same Docker image serves both API and web UI; the web build uses relative API paths so it works behind any domain or IP. Environment-specific branding/API URL can be injected at build time or runtime.
+2. **Landing page at `/`, app behind login at `/app`.** The root route shows a marketing/landing page with CTAs; authenticated users are redirected to `/app` after login. Unauthenticated access to `/app` routes redirects back to `/login`.
+3. **Fork `desktop-v2` into `packages/web`.** We copy the useful TypeScript modules (API client, types, state shape) into the new package, then redesign the UI/UX independently. `desktop-v2` is frozen and will not be dual-published.
+4. **Browser baseline: last 2 major versions of evergreen browsers.** This means current and previous major versions of Chrome, Firefox, Safari, and Edge. We do not support Internet Explorer 11 or legacy Chromium forks. This baseline lets us safely use modern CSS (flexbox/grid, container queries, `:has()`, CSS variables) and JavaScript APIs (`structuredClone`, `AbortController`, `IntersectionObserver`) without polyfills.
 
 ## Consequences
 
