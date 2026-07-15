@@ -232,16 +232,23 @@ BUILD_INFO = _read_build_info()
 
 
 class HealthCheckResponse(BaseModel):
-    """Health check response. ``version`` reflects the .dmg build that
-    shipped this server — desktop polls /healthz on each launch and
-    can compare against its own bundled version to detect
-    server↔client drift."""
+    """Health check response.
+
+    ``version`` / ``build`` / ``built_at`` reflect the code build that
+    shipped this server. ``api_version`` / ``min_client_api_version``
+    are the protocol-level compatibility gates the desktop checks on
+    every launch to decide whether to show an upgrade banner.
+    """
 
     status: str
     timestamp: str
     version: str = BUILD_INFO["version"]
     build: str = BUILD_INFO["build"]
     built_at: str = BUILD_INFO["built_at"]
+    # Protocol version — increment when making breaking API changes.
+    api_version: int = config.API_VERSION
+    # Oldest client the server still accepts without a warning.
+    min_client_api_version: int = config.MIN_CLIENT_API_VERSION
 
 
 # ───────────────────────────────────────────────────────────────────────────

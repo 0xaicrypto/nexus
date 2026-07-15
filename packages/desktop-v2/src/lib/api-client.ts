@@ -43,7 +43,19 @@ import type {
 const envBase =
   (import.meta as unknown as { env?: { VITE_NEXUS_API?: string } }).env
     ?.VITE_NEXUS_API;
-const baseUrl = envBase && envBase.length > 0 ? envBase : 'http://localhost:8001';
+// ``let`` so remote-server mode can update it at runtime via setApiBaseUrl().
+let baseUrl = envBase && envBase.length > 0 ? envBase : 'http://localhost:8001';
+
+/** Override the API base URL at runtime (used when switching to remote-server
+ *  mode). Must be called before any fetch — typically from BootGate's
+ *  server-mode init phase, before healthz polling starts. */
+export function setApiBaseUrl(url: string) {
+  baseUrl = url.replace(/\/$/, ''); // strip trailing slash
+}
+
+/** Protocol-level API version this client implements.
+ *  Must match the server's api_version in /healthz for full compatibility. */
+export const CLIENT_API_VERSION = 1;
 
 // ─────────────────────────────────────────────────────────────────────
 // Persistent user_id storage
@@ -91,6 +103,9 @@ class _ApiClient {
   private headers(extra?: HeadersInit): Headers {
     const h = new Headers(extra);
     h.set('Accept', 'application/json');
+    // Version header: server uses this to detect stale clients and can
+    // reject or warn when CLIENT_API_VERSION < server.min_client_api_version.
+    h.set('X-Nexus-Api-Version', String(CLIENT_API_VERSION));
     if (this.token) h.set('Authorization', `Bearer ${this.token}`);
     return h;
   }
@@ -1708,6 +1723,61 @@ class _ApiClient {
   async getSidecarDiagnostics(): Promise<SidecarDiagnostics | null> {
     const r = await tauriInvoke<SidecarDiagnostics>('get_sidecar_diagnostics');
     return r ?? null;
+  }
+
+  /** Read the server mode persisted in $RUNE_HOME/server_config.json.
+   *
+   * Returns:
+   *   { mode: 'local'|'remote', remote_url: string|null, base_url: string }
+   *
+   * Returns null when not running inside Tauri (plain browser / pnpm dev).
+   */
+  async getServerMode(): Promise<{
+    mode: 'local' | 'remote';
+    remote_url: string | null;
+    base_url: string;
+  } | null> {
+    return tauriInvoke<{
+      mode: 'local' | 'remote';
+      remote_url: string | null;
+      base_url: string;
+    }>('get_server_mode');
+  }
+
+  /** Persist a new server mode config. The change takes effect on next launch.
+   *  Returns { ok: true, restart_required: true } or throws on error. */
+  async setServerMode(
+    mode: 'local' | 'remote',
+    url?: string,
+  ): Promise<{ ok: boolean; restart_required: boolean } | null> {
+    return tauriInvoke<{ ok: boolean; restart_required: boolean }>(
+      'set_server_mode',
+      { mode, url: url ?? null },
+    );
+  }
+
+  /** Fetch /healthz and return the full response including API version fields.
+   *  Used by BootGate to validate protocol compatibility before login. */
+  async fetchHealthz(): Promise<{
+    status: string;
+    api_version: number;
+    min_client_api_version: number;
+    version: string;
+  } | null> {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 3000);
+      const r = await fetch(`${baseUrl}/healthz`, {
+        signal: ctl.signal,
+        credentials: 'omit',
+        headers: { 'X-Nexus-Api-Version': String(CLIENT_API_VERSION) },
+      });
+      clearTimeout(t);
+      if (!r.ok) return null;
+      return r.json();
+    } catch {
+      return null;
+    }
   }
 
   /* ────────────────────────── report PDF ────────────────────────── */

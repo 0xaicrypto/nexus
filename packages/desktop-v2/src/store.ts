@@ -44,6 +44,20 @@ export interface DraftAttachment {
 export const EMPTY_DRAFT_ATTACHMENTS: readonly DraftAttachment[] = [];
 
 interface AppState {
+  // Server mode ──────────────────────────────────────
+  // Set by BootGate on mount after reading Tauri IPC.
+  // null = not yet determined (initial state).
+  serverMode: 'local' | 'remote' | null;
+  serverUrl: string | null;
+  // true when mode=remote but no URL has been configured yet.
+  needsServerSetup: boolean;
+  // null = not yet checked; true/false = result of /healthz version check.
+  serverApiCompatible: boolean | null;
+  serverApiVersion: number | null;
+  setServerMode: (mode: 'local' | 'remote', url?: string) => void;
+  setNeedsServerSetup: (v: boolean) => void;
+  setServerApiCompatible: (ok: boolean, apiVersion: number) => void;
+
   // Auth ─────────────────────────────────────────────
   token: string | null;
   displayName: string | null;     // remembered across launches; used by avatar pill
@@ -425,6 +439,15 @@ function readStoredToken(): string | null {
 }
 
 export const useAppState = create<AppState>((set, get) => ({
+  serverMode: null,
+  serverUrl: null,
+  needsServerSetup: false,
+  serverApiCompatible: null,
+  serverApiVersion: null,
+  setServerMode: (mode, url) => set({ serverMode: mode, serverUrl: url ?? null, needsServerSetup: false }),
+  setNeedsServerSetup: (v) => set({ needsServerSetup: v }),
+  setServerApiCompatible: (ok, apiVersion) => set({ serverApiCompatible: ok, serverApiVersion: apiVersion }),
+
   token: null,
   displayName: null,
   role: null,

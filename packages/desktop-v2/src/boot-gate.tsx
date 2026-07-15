@@ -38,8 +38,10 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, type SidecarDiagnostics } from './lib/api-client';
+import { api, setApiBaseUrl, CLIENT_API_VERSION, type SidecarDiagnostics } from './lib/api-client';
+import { useAppState } from './store';
 import { SidecarDiagPanel, summariseDiag } from './components/sidecar-diag-panel';
+import { ServerSetupModal } from './components/server-setup-modal';
 
 /** Soft deadline after which we let the UI through even if /healthz
  *  is still failing — bias toward not stranding the user. The diag
@@ -56,28 +58,8 @@ const POLL_INTERVAL_MS = 500;
  *  when migrations are slow. */
 const SHOW_DIAG_AFTER_MS = 3_000;
 
-/** Per-request timeout. 2 s is plenty for a localhost probe — if it
- *  takes longer than that the sidecar isn't accepting connections yet. */
-const HEALTH_TIMEOUT_MS = 2_000;
-
 type Phase = 'probing' | 'ready' | 'soft_timeout';
 
-async function probeHealth(): Promise<boolean> {
-  try {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), HEALTH_TIMEOUT_MS);
-    const r = await fetch(`${api.baseUrl}/healthz`, {
-      signal: ctl.signal,
-      // Don't send credentials — /healthz is auth-free and we don't
-      // want the browser to flag any cookies as third-party.
-      credentials: 'omit',
-    });
-    clearTimeout(timer);
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
 
 export function BootGate({ children }: { children: ReactNode }) {
   const [phase, setPhase]       = useState<Phase>('probing');
@@ -87,8 +69,46 @@ export function BootGate({ children }: { children: ReactNode }) {
   // distinguishes "Tauri present, sidecar still booting" (we wait) from
   // "no Tauri (pnpm dev)" (let through immediately).
   const [tauriDetected, setTauriDetected] = useState(false);
+  // Phase-0: server mode init (async, runs before healthz polling).
+  const [serverInitDone, setServerInitDone] = useState(false);
 
+  const needsServerSetup = useAppState((s) => s.needsServerSetup);
+  const { setServerMode, setNeedsServerSetup, setServerApiCompatible } = useAppState.getState();
+
+  // Phase 0 — read server mode from Tauri IPC and set API base URL.
+  // This must complete before healthz polling starts so the poll hits
+  // the right host. If we're not in Tauri (pnpm dev / browser), the
+  // IPC returns null and we proceed immediately with localhost:8001.
   useEffect(() => {
+    api.getServerMode().then((result) => {
+      if (result) {
+        if (result.mode === 'remote') {
+          if (result.base_url) {
+            setApiBaseUrl(result.base_url);
+            setServerMode('remote', result.base_url);
+          } else {
+            setServerMode('remote', undefined);
+            setNeedsServerSetup(true);
+          }
+        } else {
+          setServerMode('local');
+        }
+      }
+      setServerInitDone(true);
+    }).catch(() => {
+      setServerInitDone(true); // not in Tauri — proceed normally
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Phase 1 — healthz polling. Waits for phase-0 to finish so the
+  // base URL is set before the first probe.
+  useEffect(() => {
+    if (!serverInitDone) return;
+    // If the user hasn't configured a remote URL yet, skip polling —
+    // show the setup modal instead.
+    if (needsServerSetup) return;
+
     let cancelled = false;
     const start = Date.now();
 
@@ -97,10 +117,15 @@ export function BootGate({ children }: { children: ReactNode }) {
       const now = Date.now() - start;
       setElapsed(now);
 
-      // 1) Probe /healthz.
-      const ok = await probeHealth();
+      // 1) Probe /healthz. On first success also check API version.
+      const healthz = await api.fetchHealthz();
       if (cancelled) return;
-      if (ok) {
+      if (healthz) {
+        // Version compatibility check — warn but don't block.
+        const serverApiVer = healthz.api_version ?? 1;
+        const minClientVer = healthz.min_client_api_version ?? 1;
+        const compatible = CLIENT_API_VERSION >= minClientVer;
+        setServerApiCompatible(compatible, serverApiVer);
         setPhase('ready');
         return;
       }
@@ -136,7 +161,12 @@ export function BootGate({ children }: { children: ReactNode }) {
     };
     tick();
     return () => { cancelled = true; };
-  }, []);
+  }, [serverInitDone, needsServerSetup]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Remote-server setup required — user hasn't configured a URL yet.
+  if (needsServerSetup) {
+    return <ServerSetupModal />;
+  }
 
   if (phase === 'ready' || phase === 'soft_timeout') {
     // Let the rest of the app take over. LoginView's own diag panel
@@ -161,14 +191,16 @@ export function BootGate({ children }: { children: ReactNode }) {
           <div className="flex items-center justify-center gap-3">
             <Spinner />
             <span className="text-body text-text-secondary">
-              Starting backend…
+              {serverInitDone ? 'Starting backend…' : 'Initialising…'}
             </span>
           </div>
           <p className="mt-2 text-caption text-text-tertiary">
-            {Math.floor(elapsed / 1000)}s elapsed
-            {tauriDetected && diag && (
+            {serverInitDone && (
               <>
-                {' · '}{summariseDiag(diag)}
+                {Math.floor(elapsed / 1000)}s elapsed
+                {tauriDetected && diag && (
+                  <>{' · '}{summariseDiag(diag)}</>
+                )}
               </>
             )}
           </p>

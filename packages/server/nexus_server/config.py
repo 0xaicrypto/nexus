@@ -27,8 +27,16 @@ class ServerConfig:
     # CORS
     CORS_ALLOW_ORIGINS: str = os.getenv(
         "CORS_ALLOW_ORIGINS",
-        "http://localhost:3000,http://localhost:5173",
+        # Include tauri:// and asset:// origins so a Tauri desktop
+        # connecting to a remote server works without custom env config.
+        "http://localhost:3000,http://localhost:5173,tauri://localhost,asset://localhost",
     )
+
+    # API versioning — client↔server compatibility gate.
+    # Bump API_VERSION on any breaking change; bump MIN_CLIENT_API_VERSION
+    # to force clients older than that version to display an upgrade notice.
+    API_VERSION: int = int(os.getenv("API_VERSION", "1"))
+    MIN_CLIENT_API_VERSION: int = int(os.getenv("MIN_CLIENT_API_VERSION", "1"))
 
     # JWT / Auth
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")

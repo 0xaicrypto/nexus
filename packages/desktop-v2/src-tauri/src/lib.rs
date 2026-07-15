@@ -14,11 +14,67 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, RunEvent, State};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+
+// ── Server-mode configuration ──────────────────────────────────────────────
+//
+// Persisted at $RUNE_HOME/server_config.json. Two modes:
+//   "local"  — spawn the bundled sidecar (original behaviour)
+//   "remote" — skip the sidecar; the frontend connects to remote_url instead
+//
+// This file is optional: missing = "local" (backwards-compatible default).
+
+#[derive(Serialize, Deserialize, Clone)]
+struct ServerConfigFile {
+    /// "local" | "remote"
+    mode: String,
+    /// Required when mode == "remote". Must be a valid https:// URL.
+    remote_url: Option<String>,
+}
+
+impl Default for ServerConfigFile {
+    fn default() -> Self {
+        Self { mode: "local".to_string(), remote_url: None }
+    }
+}
+
+fn server_config_path() -> PathBuf {
+    rune_home().join("server_config.json")
+}
+
+fn read_server_config() -> ServerConfigFile {
+    let path = server_config_path();
+    if let Ok(data) = fs::read_to_string(&path) {
+        if let Ok(cfg) = serde_json::from_str::<ServerConfigFile>(&data) {
+            return cfg;
+        }
+    }
+    ServerConfigFile::default()
+}
+
+fn write_server_config(cfg: ServerConfigFile) -> Result<(), String> {
+    let path = server_config_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+    }
+    let json = serde_json::to_string_pretty(&cfg)
+        .map_err(|e| format!("serialise: {e}"))?;
+    // Atomic write via tempfile so a crash mid-write can't corrupt the config.
+    let tmp = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("server_config.json.tmp");
+    fs::write(&tmp, json)
+        .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, &path)
+        .map_err(|e| format!("rename {}: {e}", path.display()))
+}
 
 /// Holds a handle to the running sidecar so we can shut it down
 /// cleanly on app exit. None until startup has spawned it.
@@ -163,6 +219,8 @@ pub fn run() {
             llm_env_write,
             restart_sidecar,
             get_sidecar_diagnostics,
+            get_server_mode,
+            set_server_mode,
         ])
         .setup(|app| {
             log::info!("Nexus desktop v{} starting", BUILD_ID);
@@ -186,7 +244,14 @@ pub fn run() {
                 "Nexus desktop v{} starting; sidecar log at {}",
                 BUILD_ID, log_path.display(),
             ));
-            spawn_backend_sidecar(app.handle())?;
+            let server_cfg = read_server_config();
+            if server_cfg.mode == "remote" {
+                let url = server_cfg.remote_url.as_deref().unwrap_or("(unconfigured)");
+                log::info!("remote-server mode: connecting to {url}; skipping sidecar spawn");
+                diag.push("sys", format!("remote-server mode — sidecar skipped; target: {url}"));
+            } else {
+                spawn_backend_sidecar(app.handle())?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -850,6 +915,57 @@ fn restart_sidecar(app: AppHandle) -> Result<String, String> {
     Ok("restarted".to_string())
 }
 
+
+/// Read the current server mode config and return it to the frontend.
+///
+/// Returns:
+///   { "mode": "local" | "remote",
+///     "remote_url": string | null,
+///     "base_url": string }   ← ready-to-use URL for fetch calls
+///
+/// ``base_url`` is always filled in:
+///   - local  → "http://localhost:8001"
+///   - remote → remote_url (or "" if not yet configured)
+#[tauri::command]
+fn get_server_mode() -> serde_json::Value {
+    let cfg = read_server_config();
+    let base_url = if cfg.mode == "remote" {
+        cfg.remote_url.clone().unwrap_or_default()
+    } else {
+        "http://localhost:8001".to_string()
+    };
+    serde_json::json!({
+        "mode":       cfg.mode,
+        "remote_url": cfg.remote_url,
+        "base_url":   base_url,
+    })
+}
+
+/// Persist a new server-mode config. The change takes effect on the
+/// NEXT launch — a restart is needed because:
+///   - local→remote: we need to skip sidecar spawn on restart
+///   - remote→local: we need to spawn the sidecar on restart
+///
+/// Returns ``{ ok: true, mode, restart_required: true }`` on success.
+#[tauri::command]
+fn set_server_mode(mode: String, url: Option<String>) -> Result<serde_json::Value, String> {
+    if mode != "local" && mode != "remote" {
+        return Err(format!(
+            "invalid mode {mode:?}; must be \"local\" or \"remote\""
+        ));
+    }
+    if mode == "remote" && url.as_ref().map_or(true, |u| u.trim().is_empty()) {
+        return Err("remote mode requires a non-empty url".to_string());
+    }
+    let remote_url = if mode == "remote" { url } else { None };
+    write_server_config(ServerConfigFile { mode: mode.clone(), remote_url })?;
+    log::info!("set_server_mode: saved mode={mode}; restart required");
+    Ok(serde_json::json!({
+        "ok":              true,
+        "mode":            mode,
+        "restart_required": true,
+    }))
+}
 
 // F24 — the previous OS-Keychain implementation was removed in favour
 // of a backend-managed identity file at ``$RUNE_HOME/identity.json``.

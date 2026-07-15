@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useAppState } from './store';
 import { useT } from './lib/i18n';
@@ -99,6 +99,41 @@ function LlmKeyReminderBanner() {
 }
 
 /**
+ * Banner shown when the server's API version is ahead of what this
+ * client supports (server forced an upgrade) OR the client is newer
+ * than the server's reported max. Both are soft warnings — the app
+ * still functions; the user is asked to update one side.
+ */
+function ApiVersionBanner() {
+  const compatible = useAppState((s) => s.serverApiCompatible);
+  const apiVersion = useAppState((s) => s.serverApiVersion);
+  const serverMode = useAppState((s) => s.serverMode);
+  const [dismissed, setDismissed] = useState(false);
+
+  // Only show for remote servers; local sidecar is always in sync.
+  if (serverMode !== 'remote') return null;
+  if (compatible !== false || dismissed) return null;
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-caution/40 bg-caution/10 px-5 py-2 text-caption text-caution">
+      <div className="flex min-w-0 items-center gap-2">
+        <AlertTriangle size={14} className="shrink-0" />
+        <span className="truncate">
+          Version mismatch: server API v{apiVersion} is not compatible with this client.
+          Please update the desktop app or the server.
+        </span>
+      </div>
+      <button
+        onClick={() => setDismissed(true)}
+        className="shrink-0 text-caution/70 hover:text-caution"
+      >
+        Dismiss
+      </button>
+    </div>
+  );
+}
+
+/**
  * Top-of-page 患者 | 研究 segmented control (decisions D1 + D14).
  * Defaults to 'research' on first launch. Tracks the visual mock at
  * docs/design/visual-mock/Research Workspace.dc.html.
@@ -182,6 +217,7 @@ function MainShell() {
     <div className="flex h-screen flex-col bg-bg text-text-primary">
       <GlobalHeader />
       <WorkspaceSwitcher />
+      <ApiVersionBanner />
       <LlmKeyReminderBanner />
       <div className="flex min-h-0 flex-1">
         <WorkspaceBody />
