@@ -366,7 +366,7 @@ export function PatientChatPage() {
       text,
       sessionId,
       patientHash: hash || null,
-      attachments: attachedFiles.map((a) => ({ name: a.name, file_id: a.fileId })),
+      attachments: attachedFiles.map((a) => a.fileId),
       skills: activeSkills,
     });
   };
