@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, FlaskConical, Plus } from 'lucide-react';
+import { ArrowLeft, CalendarDays, Check, FlaskConical, Plus, X } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert, Badge, Button, Card, Skeleton } from '@/components/ui';
 import { api, ApiError } from '@/lib/api-client';
@@ -37,7 +37,16 @@ interface Observation {
   category: string;
   ae_grade?: number;
   is_dlt?: boolean;
+  confirmed?: boolean;
   created_at: string;
+}
+
+interface Assessment {
+  visit_id: string;
+  patient_hash: string;
+  scheduled_at: string;
+  status: string;
+  completed_at?: string;
 }
 
 interface SafetyStatus {
@@ -51,13 +60,15 @@ interface Enrollment {
   enrolled_at: string;
 }
 
-type Tab = 'overview' | 'roster' | 'eligibility' | 'safety';
+type Tab = 'overview' | 'roster' | 'eligibility' | 'schedule' | 'safety' | 'protocol';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
   { key: 'roster', label: 'Roster' },
   { key: 'eligibility', label: 'Eligibility' },
+  { key: 'schedule', label: 'Schedule' },
   { key: 'safety', label: 'Safety' },
+  { key: 'protocol', label: 'Protocol' },
 ];
 
 export function ResearchDetailPage() {
@@ -84,6 +95,16 @@ export function ResearchDetailPage() {
   const [observations, setObservations] = useState<Observation[]>([]);
   const [safetyStatus, setSafetyStatus] = useState<SafetyStatus | null>(null);
   const [safetyLoading, setSafetyLoading] = useState(false);
+  const [confirmingObs, setConfirmingObs] = useState<Record<string, { aeGrade?: number; isDlt?: boolean }>>({});
+  const [confirmingIds, setConfirmingIds] = useState<Set<string>>(new Set());
+
+  // schedule
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
+
+  // unenroll
+  const [unenrollingHash, setUnenrollingHash] = useState<string | null>(null);
 
   // enroll dialog
   const [showEnroll, setShowEnroll] = useState(false);
@@ -136,9 +157,25 @@ export function ResearchDetailPage() {
       .then(([obs, status]) => {
         setObservations(obs);
         setSafetyStatus(status);
+        const init: Record<string, { aeGrade?: number; isDlt?: boolean }> = {};
+        obs.forEach((o) => {
+          if (!o.confirmed) {
+            init[o.observation_id] = { aeGrade: o.ae_grade, isDlt: o.is_dlt };
+          }
+        });
+        setConfirmingObs(init);
       })
       .catch(() => {})
       .finally(() => setSafetyLoading(false));
+  }, [studyId]);
+
+  const loadSchedule = useCallback(() => {
+    if (!studyId) return;
+    setScheduleLoading(true);
+    api.getStudyAssessments(studyId)
+      .then(setAssessments)
+      .catch(() => {})
+      .finally(() => setScheduleLoading(false));
   }, [studyId]);
 
   useEffect(() => {
@@ -146,7 +183,8 @@ export function ResearchDetailPage() {
     if (tab === 'roster') loadRoster();
     else if (tab === 'eligibility') loadEligibility();
     else if (tab === 'safety') loadSafety();
-  }, [tab, study, loadRoster, loadEligibility, loadSafety]);
+    else if (tab === 'schedule') loadSchedule();
+  }, [tab, study, loadRoster, loadEligibility, loadSafety, loadSchedule]);
 
   const openEnroll = async () => {
     if (!studyId) return;
@@ -186,6 +224,61 @@ export function ResearchDetailPage() {
       setError(err instanceof ApiError ? err.messageText : String(err));
     } finally {
       setRescanning(false);
+    }
+  };
+
+  const handleUnenroll = async (patientHash: string) => {
+    if (!studyId) return;
+    setUnenrollingHash(patientHash);
+    try {
+      await api.unenrollPatient(studyId, patientHash);
+      loadRoster();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messageText : String(err));
+    } finally {
+      setUnenrollingHash(null);
+    }
+  };
+
+  const handleConfirmObservation = async (obsId: string) => {
+    if (!studyId) return;
+    const vals = confirmingObs[obsId];
+    const next = new Set(confirmingIds);
+    next.add(obsId);
+    setConfirmingIds(next);
+    try {
+      await api.confirmObservation(studyId, obsId, vals?.aeGrade, vals?.isDlt);
+      loadSafety();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messageText : String(err));
+    } finally {
+      const after = new Set(confirmingIds);
+      after.delete(obsId);
+      setConfirmingIds(after);
+    }
+  };
+
+  const updateObsForm = (obsId: string, field: 'aeGrade' | 'isDlt', value: number | boolean) => {
+    setConfirmingObs((prev) => ({
+      ...prev,
+      [obsId]: { ...prev[obsId], [field]: value },
+    }));
+  };
+
+  const handleCompleteAssessment = async (visitId: string) => {
+    if (!studyId) return;
+    const next = new Set(completingIds);
+    next.add(visitId);
+    setCompletingIds(next);
+    try {
+      await api.completeAssessment(studyId, visitId);
+      loadSchedule();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messageText : String(err));
+    } finally {
+      const after = new Set(completingIds);
+      after.delete(visitId);
+      setCompletingIds(after);
     }
   };
 
@@ -368,6 +461,7 @@ export function ResearchDetailPage() {
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Status</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Arm</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Enrolled</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -381,6 +475,16 @@ export function ResearchDetailPage() {
                           </td>
                           <td className="px-4 py-2 text-text-secondary">{r.arm || '—'}</td>
                           <td className="px-4 py-2 text-text-tertiary">{new Date(r.enrolled_at).toLocaleDateString()}</td>
+                          <td className="px-4 py-2">
+                            <button
+                              className="rounded p-1 text-text-tertiary hover:bg-error/10 hover:text-error transition-colors"
+                              onClick={() => handleUnenroll(r.patient_hash)}
+                              disabled={unenrollingHash === r.patient_hash}
+                              title="Unenroll patient"
+                            >
+                              <X size={14} />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -436,6 +540,61 @@ export function ResearchDetailPage() {
             </div>
           )}
 
+          {tab === 'schedule' && (
+            <div className="max-w-3xl space-y-4">
+              <h2 className="text-sm font-semibold text-text-secondary">Scheduled Assessments</h2>
+              {scheduleLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-10 w-full rounded-xl" />
+                  <Skeleton className="h-10 w-full rounded-xl" />
+                </div>
+              ) : assessments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center rounded-xl border border-border py-12 text-center">
+                  <CalendarDays size={36} className="mb-3 text-text-tertiary" />
+                  <p className="text-text-tertiary">No scheduled assessments</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-surface">
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Date</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Status</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assessments.map((a) => (
+                        <tr key={a.visit_id} className="border-b border-border last:border-0">
+                          <td className="px-4 py-2 text-text-primary">{new Date(a.scheduled_at).toLocaleString()}</td>
+                          <td className="px-4 py-2 font-mono text-text-primary">{a.patient_hash.slice(0, 12)}...</td>
+                          <td className="px-4 py-2">
+                            <Badge variant={a.status === 'completed' ? 'success' : a.status === 'pending' ? 'warning' : 'default'}>
+                              {a.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-2">
+                            {a.status !== 'completed' && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleCompleteAssessment(a.visit_id)}
+                                isLoading={completingIds.has(a.visit_id)}
+                                disabled={completingIds.has(a.visit_id)}
+                              >
+                                Complete
+                              </Button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === 'safety' && (
             <div className="max-w-3xl space-y-4">
               <h2 className="text-sm font-semibold text-text-secondary">Safety</h2>
@@ -475,6 +634,7 @@ export function ResearchDetailPage() {
                             <th className="px-4 py-2 text-left font-medium text-text-secondary">AE Grade</th>
                             <th className="px-4 py-2 text-left font-medium text-text-secondary">DLT</th>
                             <th className="px-4 py-2 text-left font-medium text-text-secondary">Date</th>
+                            <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -483,12 +643,52 @@ export function ResearchDetailPage() {
                               <td className="px-4 py-2 font-mono text-text-primary">{o.patient_hash.slice(0, 12)}...</td>
                               <td className="px-4 py-2 text-text-secondary">{o.category}</td>
                               <td className={cn('px-4 py-2 font-medium', aeGradeColor(o.ae_grade))}>
-                                {o.ae_grade ?? '—'}
+                                {o.confirmed ? (
+                                  o.ae_grade ?? '—'
+                                ) : (
+                                  <select
+                                    className="rounded border border-border bg-surface px-2 py-1 text-sm"
+                                    value={confirmingObs[o.observation_id]?.aeGrade ?? ''}
+                                    onChange={(e) => updateObsForm(o.observation_id, 'aeGrade', e.target.value ? Number(e.target.value) : undefined as unknown as number)}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                  </select>
+                                )}
                               </td>
                               <td className="px-4 py-2">
-                                {o.is_dlt ? <Badge variant="error">DLT</Badge> : '—'}
+                                {o.confirmed ? (
+                                  o.is_dlt ? <Badge variant="error">DLT</Badge> : '—'
+                                ) : (
+                                  <input
+                                    type="checkbox"
+                                    checked={!!confirmingObs[o.observation_id]?.isDlt}
+                                    onChange={(e) => updateObsForm(o.observation_id, 'isDlt', e.target.checked)}
+                                    className="h-4 w-4"
+                                  />
+                                )}
                               </td>
                               <td className="px-4 py-2 text-text-tertiary">{new Date(o.created_at).toLocaleDateString()}</td>
+                              <td className="px-4 py-2">
+                                {o.confirmed ? (
+                                  <span className="inline-flex items-center gap-1 text-success text-xs">
+                                    <Check size={14} /> Confirmed
+                                  </span>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleConfirmObservation(o.observation_id)}
+                                    isLoading={confirmingIds.has(o.observation_id)}
+                                    disabled={confirmingIds.has(o.observation_id)}
+                                  >
+                                    Confirm
+                                  </Button>
+                                )}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -497,6 +697,15 @@ export function ResearchDetailPage() {
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {tab === 'protocol' && (
+            <div className="max-w-2xl space-y-4">
+              <div className="flex flex-col items-center justify-center rounded-xl border border-border py-16 text-center">
+                <FlaskConical size={36} className="mb-3 text-text-tertiary" />
+                <p className="text-text-tertiary">Protocol import/extract coming soon</p>
+              </div>
             </div>
           )}
         </main>

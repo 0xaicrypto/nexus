@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { ArrowLeft, Image as ImageIcon, Layers } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Image as ImageIcon, Layers } from 'lucide-react';
 import { api, ApiError } from '@/lib/api-client';
 import { Alert, Badge, Button, Card, Skeleton } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,13 @@ interface SeriesThumbnail {
   error?: string;
 }
 
+const WINDOW_PRESETS: Array<{ label: string; key: string }> = [
+  { label: 'Lung', key: 'lung' },
+  { label: 'Bone', key: 'bone' },
+  { label: 'Soft Tissue', key: 'soft-tissue' },
+  { label: 'Brain', key: 'brain' },
+];
+
 const modalityColors: Record<string, string> = {
   CT: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
   MR: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
@@ -45,6 +52,12 @@ export function ViewerPage() {
   const [thumbnails, setThumbnails] = useState<SeriesThumbnail[]>([]);
   const [thumbsLoading, setThumbsLoading] = useState(false);
 
+  const [expandedSeriesIdx, setExpandedSeriesIdx] = useState<number | null>(null);
+  const [sliceIndex, setSliceIndex] = useState(0);
+  const [activePreset, setActivePreset] = useState<string | null>(null);
+  const [sliceImageUrl, setSliceImageUrl] = useState<string | null>(null);
+  const [sliceLoading, setSliceLoading] = useState(false);
+
   const loadStudy = useCallback(() => {
     if (!studyId) return;
     setLoading(true);
@@ -58,17 +71,7 @@ export function ViewerPage() {
           Promise.all(
             data.series.map(async (s) => {
               try {
-                const resp = await fetch(
-                  `/api/v1/dicom/studies/${studyId}/series/${s.series_uid}/render?index=0&format=png`,
-                  {
-                    headers: {
-                      Authorization: `Bearer ${api.getToken()}`,
-                      'X-Nexus-Api-Version': '1',
-                    },
-                  },
-                );
-                if (!resp.ok) throw new Error('Failed to load');
-                const blob = await resp.blob();
+                const blob = await api.renderDicomSlice(studyId, data.series!.indexOf(s), 0);
                 return { series_uid: s.series_uid, url: URL.createObjectURL(blob) };
               } catch {
                 return { series_uid: s.series_uid, url: '', error: 'Failed to load thumbnail' };
@@ -94,6 +97,52 @@ export function ViewerPage() {
       });
     };
   }, [thumbnails]);
+
+  const loadSliceImage = useCallback(async (seriesIdx: number, idx: number, preset: string | null) => {
+    if (!studyId) return;
+    setSliceLoading(true);
+    setSliceImageUrl(null);
+    try {
+      const blob = await api.renderDicomSlice(studyId, seriesIdx, idx, preset || undefined);
+      const url = URL.createObjectURL(blob);
+      setSliceImageUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return url; });
+    } catch {
+      setSliceImageUrl(null);
+    } finally {
+      setSliceLoading(false);
+    }
+  }, [studyId]);
+
+  useEffect(() => {
+    return () => { if (sliceImageUrl) URL.revokeObjectURL(sliceImageUrl); };
+  }, [sliceImageUrl]);
+
+  const handleSeriesClick = (idx: number) => {
+    if (expandedSeriesIdx === idx) {
+      setExpandedSeriesIdx(null);
+      setSliceImageUrl(null);
+      return;
+    }
+    setExpandedSeriesIdx(idx);
+    setSliceIndex(0);
+    loadSliceImage(idx, 0, activePreset);
+  };
+
+  const handleSliceChange = (delta: number) => {
+    if (expandedSeriesIdx === null || !study?.series) return;
+    const series = study.series[expandedSeriesIdx];
+    const newIdx = Math.max(0, Math.min(series.slice_count - 1, sliceIndex + delta));
+    setSliceIndex(newIdx);
+    loadSliceImage(expandedSeriesIdx, newIdx, activePreset);
+  };
+
+  const handlePreset = (key: string) => {
+    const next = activePreset === key ? null : key;
+    setActivePreset(next);
+    if (expandedSeriesIdx !== null) {
+      loadSliceImage(expandedSeriesIdx, sliceIndex, next);
+    }
+  };
 
   const colorClass = study ? (modalityColors[study.modality] || 'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400') : '';
 
@@ -162,6 +211,66 @@ export function ViewerPage() {
             </div>
           </Card>
 
+          {expandedSeriesIdx !== null && study.series && (
+            <Card className="mb-6 overflow-hidden">
+              <div className="flex items-center justify-between border-b border-border bg-surface px-4 py-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-text-primary">
+                    {study.series[expandedSeriesIdx].series_description || `Series ${expandedSeriesIdx + 1}`}
+                  </h3>
+                  <Badge variant="default">
+                    Slice {sliceIndex + 1} / {study.series[expandedSeriesIdx].slice_count}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex gap-1">
+                    {WINDOW_PRESETS.map((p) => (
+                      <Button
+                        key={p.key}
+                        size="sm"
+                        variant={activePreset === p.key ? 'primary' : 'secondary'}
+                        onClick={() => handlePreset(p.key)}
+                      >
+                        {p.label}
+                      </Button>
+                    ))}
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleSliceChange(-1)}
+                    disabled={sliceIndex === 0}
+                  >
+                    <ChevronLeft size={14} />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleSliceChange(1)}
+                    disabled={sliceIndex >= study.series[expandedSeriesIdx].slice_count - 1}
+                  >
+                    <ChevronRight size={14} />
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setExpandedSeriesIdx(null)}>
+                    ✕
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-center justify-center bg-black p-4" style={{ minHeight: '400px' }}>
+                {sliceLoading ? (
+                  <Skeleton className="h-96 w-full" />
+                ) : sliceImageUrl ? (
+                  <img src={sliceImageUrl} alt={`Slice ${sliceIndex + 1}`} className="max-h-[600px] object-contain" />
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <ImageIcon size={48} className="text-text-tertiary" />
+                    <p className="text-sm text-text-tertiary">Failed to load slice</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+          )}
+
           <div className="mb-4 flex items-center gap-2">
             <Layers size={18} className="text-text-secondary" />
             <h2 className="text-lg font-semibold text-text-primary">Series</h2>
@@ -184,7 +293,14 @@ export function ViewerPage() {
               {thumbnails.map((t, i) => {
                 const series = study.series?.[i];
                 return (
-                  <Card key={t.series_uid} className="overflow-hidden">
+                <div
+                  key={t.series_uid}
+                  className={cn(
+                    'rounded-xl border border-border bg-surface-elevated shadow-sm overflow-hidden cursor-pointer transition-all',
+                    expandedSeriesIdx === i && 'ring-2 ring-accent',
+                  )}
+                    onClick={() => handleSeriesClick(i)}
+                  >
                     {t.url ? (
                       <img
                         src={t.url}
@@ -204,7 +320,7 @@ export function ViewerPage() {
                         {series?.slice_count || 0} slices · UID: {t.series_uid.slice(0, 12)}...
                       </p>
                     </div>
-                  </Card>
+                  </div>
                 );
               })}
             </div>

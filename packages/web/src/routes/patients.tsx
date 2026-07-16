@@ -326,6 +326,7 @@ interface ChatMessage {
   reasoning?: string;
   isStreaming?: boolean;
   tier?: string;
+  citations?: Array<{text: string; source?: string}>;
 }
 
 export function PatientChatPage() {
@@ -338,6 +339,7 @@ export function PatientChatPage() {
   const [sessionId, setSessionId] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{name: string; fileId: string}>>([]);
+  const [messageCitations, setMessageCitations] = useState<Record<string, Array<{text: string; source?: string}>>>({});
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -388,6 +390,9 @@ export function PatientChatPage() {
       { text, sessionId, patientHash: hash || null, attachments: attachedFiles.map((a) => ({ name: a.name, file_id: a.fileId })) },
       abortRef.current.signal,
     )) {
+      if (chunk.type === 'citations') {
+        setMessageCitations(prev => ({ ...prev, [assistantMsg.id]: chunk.items }));
+      }
       setMessages((prev) => {
         const newMessages = [...prev];
         const last = newMessages[newMessages.length - 1];
@@ -466,6 +471,15 @@ export function PatientChatPage() {
                     <p className="mt-1 whitespace-pre-wrap text-xs text-text-tertiary">{m.reasoning}</p>
                   </details>
                 )}
+                {(m.citations && m.citations.length > 0 ? m.citations : messageCitations[m.id]) && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(m.citations && m.citations.length > 0 ? m.citations : messageCitations[m.id]).map((c, i) => (
+                      <span key={i} className="inline-flex rounded-full bg-surface px-2 py-0.5 text-xs text-text-tertiary border border-border">
+                        {c.source ? `[${c.source}] ` : ''}{c.text.slice(0, 60)}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {m.text || (m.isStreaming ? (
                   <span role="status" aria-label={t('chat.streaming')} className="animate-pulse">●</span>
                 ) : null)}
@@ -538,6 +552,8 @@ function applyChunk(msg: ChatMessage, chunk: ChatStreamChunk): ChatMessage {
       return { ...msg, reasoning: (msg.reasoning || '') + chunk.text };
     case 'final_answer_chunk':
       return { ...msg, text: msg.text + chunk.text };
+    case 'citations':
+      return { ...msg, citations: chunk.items };
     case 'turn_complete':
       return { ...msg, isStreaming: false };
     case 'error':

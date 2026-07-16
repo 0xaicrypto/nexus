@@ -391,7 +391,7 @@ class ApiClient {
     return this.fetch(`/api/v1/research/studies/${studyId}/eligibility`);
   }
 
-  async getStudyObservations(studyId: string): Promise<Array<{observation_id: string; patient_hash: string; category: string; ae_grade?: number; is_dlt?: boolean; created_at: string}>> {
+  async getStudyObservations(studyId: string): Promise<Array<{observation_id: string; patient_hash: string; category: string; ae_grade?: number; is_dlt?: boolean; confirmed?: boolean; created_at: string}>> {
     return this.fetch(`/api/v1/research/studies/${studyId}/observations`);
   }
 
@@ -409,6 +409,22 @@ class ApiClient {
 
   async rescanEligibility(studyId: string): Promise<{job_id: string; status: string}> {
     return this.fetch(`/api/v1/research/studies/${studyId}/eligibility/rescan`, { method: 'POST' });
+  }
+
+  async unenrollPatient(studyId: string, patientHash: string): Promise<{ok: boolean}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/enrollments/${patientHash}`, { method: 'DELETE' });
+  }
+
+  async confirmObservation(studyId: string, obsId: string, aeGrade?: number, isDlt?: boolean): Promise<{ok: boolean}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/observations/${obsId}/confirm`, { method: 'POST', body: JSON.stringify({ ae_grade: aeGrade, is_dlt: isDlt }) });
+  }
+
+  async getStudyAssessments(studyId: string): Promise<Array<{visit_id: string; patient_hash: string; scheduled_at: string; status: string; completed_at?: string}>> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/assessments`);
+  }
+
+  async completeAssessment(studyId: string, visitId: string, notes?: string): Promise<{ok: boolean}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/assessments/${visitId}/complete`, { method: 'POST', body: JSON.stringify({ notes }) });
   }
 
   /* ────────────────────────── skills ────────────────────────── */
@@ -459,6 +475,51 @@ class ApiClient {
     return this.fetch(`/api/v1/docs/docs/${docId}/snapshots/${snapshotId}/restore`, { method: 'POST' });
   }
 
+  async runPhiScan(docId: string): Promise<{findings: Array<{start: number; end: number; text: string; suggestion: string}>}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/phi-scan`, { method: 'POST' });
+  }
+
+  async exportDocx(docId: string): Promise<{docx_path: string; size_bytes: number}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/export`, { method: 'POST' });
+  }
+
+  async *polishDoc(docId: string, selection: string, instruction?: string): AsyncIterable<{text: string; done?: boolean}> {
+    const r = await fetch(`/api/v1/docs/docs/${docId}/polish`, {
+      method: 'POST',
+      headers: this.headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ selection, instruction }),
+    });
+    if (!r.ok || !r.body) throw new ApiError(r.status, await r.text().catch(() => ''), '/polish');
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const raw = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          for (const line of raw.split('\n')) {
+            if (line.startsWith('data: ')) {
+              try { yield JSON.parse(line.slice(6)); } catch { /* ignore */ }
+            }
+          }
+        }
+      }
+    } finally { try { reader.releaseLock(); } catch { /* ignore */ } }
+  }
+
+  async sendDocChat(docId: string, text: string): Promise<{response_text: string}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/chat`, { method: 'POST', body: JSON.stringify({ text }) });
+  }
+
+  async addDocReference(docId: string, data: {kind: string; content: string; source_patient_hash?: string; label?: string}): Promise<{reference_id: string}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/references`, { method: 'POST', body: JSON.stringify(data) });
+  }
+
   /* ────────────────────────── chat (SSE) ────────────────────────── */
 
   async *sendChat(
@@ -468,6 +529,50 @@ class ApiClient {
   ): AsyncIterable<ChatStreamChunk> {
     return yield* this.sendChatFull({ text, sessionId }, abortSignal);
   }
+
+  /* ────────────────────────── DICOM render ────────────────────────── */
+
+  async renderDicomSlice(studyId: string, seriesIndex: number, sliceIndex: number, preset?: string): Promise<Blob> {
+    const params = new URLSearchParams({ index: String(sliceIndex), format: 'png' });
+    if (preset) params.set('preset', preset);
+    const r = await fetch(`/api/v1/dicom/studies/${studyId}/series/${seriesIndex}/render?${params}`, {
+      headers: this.headers(),
+    });
+    if (!r.ok) throw new ApiError(r.status, await r.text().catch(() => ''), '/render');
+    return r.blob();
+  }
+
+  async sendToAgent(studyId: string, seriesIndex: number, sliceIndex: number, note?: string): Promise<{ok: boolean}> {
+    return this.fetch('/api/v1/dicom/send-to-agent', { method: 'POST', body: JSON.stringify({ study_id: studyId, series_index: seriesIndex, slice_index: sliceIndex, note }) });
+  }
+
+  /* ────────────────────────── schedule ────────────────────────── */
+
+  async listSchedule(limit = 50): Promise<{tasks: Array<{task_id: string; kind: string; fire_at: string; payload: Record<string,unknown>; patient_hash?: string; session_id?: string}>}> {
+    return this.fetch(`/api/v1/schedule/list?limit=${limit}`);
+  }
+
+  async cancelTask(taskId: string): Promise<{task_id: string}> {
+    return this.fetch(`/api/v1/schedule/${taskId}`, { method: 'DELETE' });
+  }
+
+  /* ────────────────────────── export ────────────────────────── */
+
+  async exportBundle(): Promise<{bundle_path: string; size_bytes: number; created_at: string; counts: Record<string,number>}> {
+    return this.fetch('/api/v1/export/bundle', { method: 'POST' });
+  }
+
+  /* ────────────────────────── file manager ────────────────────────── */
+
+  async listFiles(limit = 200): Promise<{files: Array<{file_id: string; name: string; mime: string; size_bytes: number; created_at: string}>}> {
+    return this.fetch(`/api/v1/files/list?limit=${limit}`);
+  }
+
+  async deleteFile(fileId: string): Promise<void> {
+    return this.fetch(`/api/v1/files/${fileId}`, { method: 'DELETE' });
+  }
+
+  /* ────────────────────────── chat (SSE) ────────────────────────── */
 
   async *sendChatFull(
     opts: SendChatOptions,
