@@ -4,6 +4,7 @@ import { NavLink, Outlet, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, ChevronRight, Paperclip, Plus, Search, User } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { NewPatientDialog } from '@/components/NewPatientDialog';
+import { SkillsBar } from '@/components/SkillsBar';
 import { Alert, Button, Input, Card, Badge, Skeleton, Textarea } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { api, ApiError } from '@/lib/api-client';
@@ -328,6 +329,7 @@ export function PatientChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{name: string; fileId: string}>>([]);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -364,10 +366,15 @@ export function PatientChatPage() {
       sessionId,
       patientHash: hash || null,
       attachments: attachedFiles.map((a) => ({ name: a.name, file_id: a.fileId })),
+      skills: activeSkills,
     });
   };
 
   const handleStop = () => store.stopStream(sessionId);
+
+  const toggleSkill = (name: string) => {
+    setActiveSkills((prev) => prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]);
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -467,6 +474,7 @@ export function PatientChatPage() {
       )}
       <footer className="border-t border-border bg-surface px-4 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
+          <SkillsBar active={activeSkills} onToggle={toggleSkill} />
           {attachedFiles.length > 0 && (
             <div className="flex gap-2 flex-wrap">
               {attachedFiles.map((f) => (

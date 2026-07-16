@@ -520,11 +520,13 @@ class ApiClient {
     } finally { try { reader.releaseLock(); } catch { /* ignore */ } }
   }
 
-  async *sendDocChat(docId: string, message: string): AsyncIterable<{type: string; text?: string; reply?: string; doc_body?: string; message?: string}> {
+  async *sendDocChat(docId: string, message: string, skills?: string[]): AsyncIterable<{type: string; text?: string; reply?: string; doc_body?: string; message?: string}> {
+    const body: Record<string, unknown> = { message };
+    if (skills?.length) body.skills = skills;
     const r = await fetch(`/api/v1/docs/${docId}/chat`, {
       method: 'POST',
       headers: this.headers({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(body),
     });
     if (!r.ok || !r.body) throw new ApiError(r.status, await r.text().catch(() => ''), '/doc/chat');
     const reader = r.body.getReader();

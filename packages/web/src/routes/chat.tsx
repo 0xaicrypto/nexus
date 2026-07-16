@@ -7,6 +7,7 @@ import type { LlmStatus } from '@/lib/types';
 import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { AppShell } from '@/components/layout/AppShell';
+import { SkillsBar } from '@/components/SkillsBar';
 import { Alert, Button, Badge, Textarea } from '@/components/ui';
 
 export function ChatPage() {
@@ -20,6 +21,7 @@ export function ChatPage() {
   const [input, setInput] = useState('');
   const [uploadingFile, setUploadingFile] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{name: string; fileId: string}>>([]);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -70,10 +72,15 @@ export function ChatPage() {
       text,
       sessionId,
       attachments: attachedFiles.map((a) => ({ name: a.name, file_id: a.fileId })),
+      skills: activeSkills,
     });
   };
 
   const handleStop = () => store.stopStream(sessionId);
+
+  const toggleSkill = (name: string) => {
+    setActiveSkills((prev) => prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]);
+  };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -166,6 +173,7 @@ export function ChatPage() {
 
         <footer className="border-t border-border bg-surface px-4 py-4">
           <div className="mx-auto flex max-w-3xl flex-col gap-2">
+            <SkillsBar active={activeSkills} onToggle={toggleSkill} />
             {attachedFiles.length > 0 && (
               <div className="flex gap-2 flex-wrap">
                 {attachedFiles.map((f) => (

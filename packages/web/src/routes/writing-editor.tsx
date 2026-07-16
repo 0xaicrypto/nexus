@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Download, FilePlus, FileText, History, MessageSquare, RotateCcw, ShieldAlert, Sparkles, X } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
+import { SkillsBar } from '@/components/SkillsBar';
 import { Alert, Button, Card, Skeleton, Textarea } from '@/components/ui';
 import { api, ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -66,6 +67,7 @@ export function WritingEditorPage() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
 
   const [refDialogOpen, setRefDialogOpen] = useState(false);
   const [refForm, setRefForm] = useState({ kind: 'guideline', content: '', label: '', source_patient_hash: '' });
@@ -230,7 +232,7 @@ export function WritingEditorPage() {
     setChatInput('');
     setChatLoading(true);
     try {
-      for await (const chunk of api.sendDocChat(docId, text)) {
+      for await (const chunk of api.sendDocChat(docId, text, activeSkills)) {
         if (chunk.type === 'reply_chunk' && chunk.text) {
           setChatMessages((prev) => {
             const msgs = [...prev];
@@ -559,6 +561,7 @@ export function WritingEditorPage() {
                   <X size={14} />
                 </button>
               </div>
+              <SkillsBar active={activeSkills} onToggle={(name) => setActiveSkills((prev) => prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name])} />
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {chatMessages.length === 0 && (
                   <p className="text-sm text-text-tertiary text-center mt-4">Ask questions about this document.</p>
