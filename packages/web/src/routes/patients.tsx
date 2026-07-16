@@ -5,6 +5,7 @@ import { ArrowLeft, ChevronRight, Paperclip, Plus, Search, User } from 'lucide-r
 import { AppShell } from '@/components/layout/AppShell';
 import { NewPatientDialog } from '@/components/NewPatientDialog';
 import { SkillsBar } from '@/components/SkillsBar';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Alert, Button, Input, Card, Badge, Skeleton, Textarea } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { api, ApiError } from '@/lib/api-client';
@@ -458,9 +459,10 @@ export function PatientChatPage() {
                     ))}
                   </div>
                 )}
-                {m.text || (m.isStreaming ? (
+                <MarkdownRenderer content={m.text || ''} />
+                {m.isStreaming ? (
                   <span role="status" aria-label={t('chat.streaming')} className="animate-pulse">●</span>
-                ) : null)}
+                ) : null}
               </div>
             </div>
           ))}

@@ -52,7 +52,7 @@ export function SkillsPage() {
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const r = await api.searchSkills(query.trim());
+      const r = await api.searchSkills(query.trim(), 'official');
       setSearchResults(r.results);
     } catch (err) {
       setError(err instanceof ApiError ? err.messageText : String(err));

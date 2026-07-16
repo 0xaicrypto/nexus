@@ -57,8 +57,22 @@ export function PluginsPage() {
     setMarketLoading(true);
     setMarketError(null);
     try {
-      const r = await api.searchSkills(q, src);
-      setResults(r.results || []);
+      if (src === 'all') {
+        const [official, github] = await Promise.all([
+          api.searchSkills(q, 'official').then(r => r.results || []),
+          api.searchSkills(q, 'github').then(r => r.results || []).catch(() => []),
+        ]);
+        const seen = new Set<string>();
+        const combined = [...official, ...github].filter(r => {
+          if (seen.has(r.identifier)) return false;
+          seen.add(r.identifier);
+          return true;
+        });
+        setResults(combined);
+      } else {
+        const r = await api.searchSkills(q, src);
+        setResults(r.results || []);
+      }
     } catch (err) {
       setMarketError(err instanceof ApiError ? err.messageText : 'Search failed');
       setResults([]);

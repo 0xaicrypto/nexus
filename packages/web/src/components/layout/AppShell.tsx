@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard,
@@ -153,6 +153,23 @@ function UserMenu() {
 function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   const { role } = useAuthStore();
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [isResizing, setIsResizing] = useState(false);
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      setSidebarWidth(Math.min(400, Math.max(180, e.clientX)));
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
 
   const visibleItems = navItems.filter((item) => !item.admin || role === 'admin');
 
@@ -168,10 +185,12 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
       )}
 
       <aside
+        ref={sidebarRef}
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-60 flex-col border-r border-border bg-surface transition-transform lg:static lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex flex-col border-r border-border bg-surface transition-transform lg:static lg:translate-x-0',
           mobileOpen ? 'translate-x-0' : '-translate-x-full',
         )}
+        style={{ width: sidebarWidth }}
       >
         <header className="flex h-14 items-center gap-2 border-b border-border px-4">
           <div className="h-6 w-6 rounded-md bg-accent" />
@@ -218,6 +237,12 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
           </div>
           <UserMenu />
         </div>
+
+        <div
+          className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-accent/50 transition-colors"
+          style={{ width: 4, cursor: 'col-resize' }}
+          onMouseDown={(e) => { e.preventDefault(); setIsResizing(true); }}
+        />
       </aside>
     </>
   );
@@ -226,11 +251,28 @@ function Sidebar({ mobileOpen, onClose }: { mobileOpen: boolean; onClose: () => 
 export function AppShell({ children, rail, breadcrumb }: { children: React.ReactNode; rail?: React.ReactNode; breadcrumb?: React.ReactNode }) {
   const { t } = useTranslation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [railWidth, setRailWidth] = useState(320);
+  const [isRailResizing, setIsRailResizing] = useState(false);
   const location = useLocation();
 
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isRailResizing) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = window.innerWidth - e.clientX;
+      setRailWidth(Math.min(500, Math.max(240, newWidth)));
+    };
+    const handleMouseUp = () => setIsRailResizing(false);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isRailResizing]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -253,7 +295,14 @@ export function AppShell({ children, rail, breadcrumb }: { children: React.React
         <div className="flex flex-1 overflow-hidden">
           <main className="flex min-w-0 flex-1 flex-col overflow-y-auto">{children}</main>
           {rail && (
-            <aside className="hidden w-80 border-l border-border bg-surface md:block">{rail}</aside>
+            <div className="hidden md:flex">
+              <div
+                className="w-1 cursor-col-resize hover:bg-accent/50 transition-colors shrink-0"
+                style={{ width: 4, cursor: 'col-resize' }}
+                onMouseDown={(e) => { e.preventDefault(); setIsRailResizing(true); }}
+              />
+              <aside className="border-l border-border bg-surface" style={{ width: railWidth }}>{rail}</aside>
+            </div>
           )}
         </div>
       </div>

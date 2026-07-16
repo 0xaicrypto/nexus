@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useChatStore } from '@/stores/chat';
 import { AppShell } from '@/components/layout/AppShell';
 import { SkillsBar } from '@/components/SkillsBar';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Alert, Button, Badge, Textarea } from '@/components/ui';
 
 export function ChatPage() {
@@ -157,7 +158,8 @@ export function ChatPage() {
                       : 'border border-border bg-surface-elevated text-text-primary shadow-sm'
                   }`}
                 >
-                  {m.text || (m.isStreaming ? <span className="animate-pulse" role="status" aria-label={t('chat.streaming')}>●</span> : null)}
+                  <MarkdownRenderer content={m.text || ''} />
+                  {m.isStreaming ? <span className="animate-pulse" role="status" aria-label={t('chat.streaming')}>●</span> : null}
                 </div>
               </div>
             ))}

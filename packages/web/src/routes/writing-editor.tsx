@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Download, FilePlus, FileText, History, MessageSquare, RotateCcw, ShieldAlert, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Download, Eye, FilePlus, FileText, History, MessageSquare, RotateCcw, ShieldAlert, Sparkles, X } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { SkillsBar } from '@/components/SkillsBar';
+import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Alert, Button, Card, Skeleton, Textarea } from '@/components/ui';
 import { api, ApiError } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -72,6 +73,8 @@ export function WritingEditorPage() {
   const [refDialogOpen, setRefDialogOpen] = useState(false);
   const [refForm, setRefForm] = useState({ kind: 'guideline', content: '', label: '', source_patient_hash: '' });
   const [refSubmitting, setRefSubmitting] = useState(false);
+
+  const [preview, setPreview] = useState(false);
 
   const polishRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -446,6 +449,13 @@ export function WritingEditorPage() {
           <Button
             variant="ghost"
             size="sm"
+            onClick={() => setPreview((v) => !v)}
+          >
+            <Eye size={14} className="mr-1" /> {preview ? 'Edit' : 'Preview'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setRefDialogOpen(true)}
           >
             <FilePlus size={14} className="mr-1" /> Reference
@@ -495,13 +505,19 @@ export function WritingEditorPage() {
               </div>
 
               <div>
-                <Textarea
-                  ref={bodyRef}
-                  value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  placeholder="Start writing..."
-                  className="min-h-[300px] resize-none overflow-hidden text-sm"
-                />
+                {preview ? (
+                  <div className="min-h-[300px] rounded-lg border border-border bg-surface-elevated p-4">
+                    <MarkdownRenderer content={body} />
+                  </div>
+                ) : (
+                  <Textarea
+                    ref={bodyRef}
+                    value={body}
+                    onChange={(e) => setBody(e.target.value)}
+                    placeholder="Start writing..."
+                    className="min-h-[300px] resize-none overflow-hidden text-sm"
+                  />
+                )}
               </div>
 
               {doc.updated_at && (
