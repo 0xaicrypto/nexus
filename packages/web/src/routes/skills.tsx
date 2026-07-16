@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, Puzzle, Download } from 'lucide-react';
+import { Search, Puzzle, Download, Trash2 } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert, Button, Input, Card, Badge, Skeleton } from '@/components/ui';
 import { api, ApiError } from '@/lib/api-client';
@@ -31,6 +31,7 @@ export function SkillsPage() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
+  const [uninstalling, setUninstalling] = useState<string | null>(null);
 
   const loadSkills = () => {
     setLoading(true);
@@ -76,6 +77,18 @@ export function SkillsPage() {
       setSkills((prev) => prev.map((s) => (s.name === r.name ? { ...s, enabled: r.enabled } : s)));
     } catch (err) {
       setError(err instanceof ApiError ? err.messageText : String(err));
+    }
+  };
+
+  const handleUninstall = async (name: string) => {
+    setUninstalling(name);
+    try {
+      await api.uninstallSkill(name);
+      loadSkills();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messageText : String(err));
+    } finally {
+      setUninstalling(null);
     }
   };
 
@@ -174,13 +187,24 @@ export function SkillsPage() {
                           v{s.version} · {s.author}
                         </p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant={s.enabled ? 'secondary' : 'primary'}
-                        onClick={() => handleToggle(s.name, !!s.enabled)}
-                      >
-                        {s.enabled ? t('skills.disable', 'Disable') : t('skills.enable', 'Enable')}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant={s.enabled ? 'secondary' : 'primary'}
+                          onClick={() => handleToggle(s.name, !!s.enabled)}
+                        >
+                          {s.enabled ? t('skills.disable', 'Disable') : t('skills.enable', 'Enable')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleUninstall(s.name)}
+                          disabled={uninstalling === s.name}
+                          isLoading={uninstalling === s.name}
+                        >
+                          <Trash2 size={14} />
+                        </Button>
+                      </div>
                     </div>
                   </Card>
                 ))}

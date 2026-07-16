@@ -381,6 +381,36 @@ class ApiClient {
     return this.fetch(`/api/v1/research/studies/${studyId}`);
   }
 
+  /* ────────────────────────── research detail ────────────────────────── */
+
+  async getStudyRoster(studyId: string): Promise<Array<{patient_hash: string; initials?: string; status: string; arm?: string; enrolled_at: string}>> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/roster`);
+  }
+
+  async getStudyEligibility(studyId: string): Promise<{screenings: Array<{patient_hash: string; status: string; criteria_results?: Array<{criterion: string; passed: boolean}>}>}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/eligibility`);
+  }
+
+  async getStudyObservations(studyId: string): Promise<Array<{observation_id: string; patient_hash: string; category: string; ae_grade?: number; is_dlt?: boolean; created_at: string}>> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/observations`);
+  }
+
+  async getStudyEnrollments(studyId: string): Promise<Array<{patient_hash: string; status: string; arm?: string; enrolled_at: string}>> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/enrollments`);
+  }
+
+  async enrollPatient(studyId: string, patientHash: string, arm?: string): Promise<{patient_hash: string; status: string}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/enrollments`, { method: 'POST', body: JSON.stringify({ patient_hash: patientHash, arm }) });
+  }
+
+  async getSafetyStatus(studyId: string): Promise<{triggered_rules: Array<{rule: string; description: string}>}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/safety/stop-rule-status`);
+  }
+
+  async rescanEligibility(studyId: string): Promise<{job_id: string; status: string}> {
+    return this.fetch(`/api/v1/research/studies/${studyId}/eligibility/rescan`, { method: 'POST' });
+  }
+
   /* ────────────────────────── skills ────────────────────────── */
 
   async listSkills(): Promise<{skills: Array<{name: string; title: string; description: string; version: string; author: string; enabled?: boolean}>}> {
@@ -399,6 +429,10 @@ class ApiClient {
     return this.fetch(`/api/v1/skills/${name}/toggle`, { method: 'POST', body: JSON.stringify({ enabled }) });
   }
 
+  async uninstallSkill(name: string): Promise<{ok: boolean; name: string}> {
+    return this.fetch(`/api/v1/skills/${name}`, { method: 'DELETE' });
+  }
+
   /* ────────────────────────── writing ────────────────────────── */
 
   async listDocs(): Promise<{docs: Array<{id: string; title: string; updated_at: string; ref_count: number}>}> {
@@ -411,6 +445,18 @@ class ApiClient {
 
   async getDoc(docId: string): Promise<{id: string; title: string; body: string; created_at: string; updated_at: string}> {
     return this.fetch(`/api/v1/docs/docs/${docId}`);
+  }
+
+  async updateDoc(docId: string, data: {title: string; body: string}): Promise<{id: string; title: string; body: string; updated_at: string}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}`, { method: 'PUT', body: JSON.stringify(data) });
+  }
+
+  async getDocSnapshots(docId: string): Promise<{snapshots: Array<{snapshot_id: string; created_at: string; body_preview: string}>}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/snapshots`);
+  }
+
+  async restoreSnapshot(docId: string, snapshotId: string): Promise<{id: string; body: string}> {
+    return this.fetch(`/api/v1/docs/docs/${docId}/snapshots/${snapshotId}/restore`, { method: 'POST' });
   }
 
   /* ────────────────────────── chat (SSE) ────────────────────────── */

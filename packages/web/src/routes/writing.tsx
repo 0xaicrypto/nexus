@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Plus, FileText } from 'lucide-react';
 import { AppShell } from '@/components/layout/AppShell';
 import { Alert, Button, Input, Card, Skeleton } from '@/components/ui';
@@ -101,15 +101,12 @@ export function WritingPage() {
           ) : (
             <div className="space-y-2">
               {docs.map((d) => (
-                <div
+                <Link
                   key={d.id}
-                  className="cursor-pointer"
-                  onClick={() => navigate(`/app/writing/${d.id}`)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter') navigate(`/app/writing/${d.id}`); }}
+                  to={`/app/writing/${d.id}`}
+                  className="block rounded-xl transition-colors hover:bg-surface"
                 >
-                  <Card className="p-4 transition-colors hover:bg-surface">
+                  <Card className="p-4">
                     <div className="flex items-center justify-between">
                       <div>
                         <h3 className="font-medium text-text-primary">{d.title || t('writing.untitled', 'Untitled')}</h3>
@@ -121,7 +118,7 @@ export function WritingPage() {
                       <FileText size={16} className="text-text-tertiary" />
                     </div>
                   </Card>
-                </div>
+                </Link>
               ))}
             </div>
           )}
