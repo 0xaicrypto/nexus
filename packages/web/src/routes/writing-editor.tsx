@@ -380,6 +380,14 @@ export function WritingEditorPage() {
           </Button>
           <FileText size={18} className="text-text-tertiary" />
           <h1 className="font-semibold text-text-primary">{doc.title || 'Untitled'}</h1>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setPreview((v) => !v)}
+            className="ml-3"
+          >
+            <Eye size={14} className="mr-1" /> {preview ? 'Edit' : 'Preview'}
+          </Button>
           <div className="ml-auto flex items-center gap-2">
             <Button
               variant="ghost"
@@ -446,13 +454,6 @@ export function WritingEditorPage() {
               </div>
             )}
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setPreview((v) => !v)}
-          >
-            <Eye size={14} className="mr-1" /> {preview ? 'Edit' : 'Preview'}
-          </Button>
           <Button
             variant="ghost"
             size="sm"
