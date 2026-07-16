@@ -30,6 +30,7 @@ interface PhiFinding {
 interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
+  _done?: boolean;
 }
 
 export function WritingEditorPage() {
@@ -224,14 +225,50 @@ export function WritingEditorPage() {
   const handleSendChat = async () => {
     if (!docId || !chatInput.trim()) return;
     const text = chatInput.trim();
-    setChatMessages((prev) => [...prev, { role: 'user', text }]);
+    const userMsg: ChatMessage = { role: 'user', text };
+    setChatMessages((prev) => [...prev, userMsg]);
     setChatInput('');
     setChatLoading(true);
     try {
-      const result = await api.sendDocChat(docId, text);
-      setChatMessages((prev) => [...prev, { role: 'assistant', text: result.response_text }]);
+      for await (const chunk of api.sendDocChat(docId, text)) {
+        if (chunk.type === 'reply_chunk' && chunk.text) {
+          setChatMessages((prev) => {
+            const msgs = [...prev];
+            const last = msgs[msgs.length - 1];
+            if (!last || last.role !== 'assistant' || last._done) {
+              msgs.push({ role: 'assistant', text: chunk.text || '' });
+            } else {
+              msgs[msgs.length - 1] = { ...last, text: last.text + (chunk.text || '') };
+            }
+            return msgs;
+          });
+        } else if (chunk.type === 'doc_chunk' && chunk.text) {
+          setChatMessages((prev) => {
+            const msgs = [...prev];
+            const last = msgs[msgs.length - 1];
+            if (last && last.role === 'assistant') {
+              msgs[msgs.length - 1] = { ...last, text: last.text + '\n📄 ' + chunk.text };
+            }
+            return msgs;
+          });
+        } else if (chunk.type === 'done') {
+          setChatMessages((prev) => {
+            const msgs = [...prev];
+            const last = msgs[msgs.length - 1];
+            if (last && last.role === 'assistant') {
+              msgs[msgs.length - 1] = { ...last, _done: true };
+            }
+            return msgs;
+          });
+          if (chunk.doc_body) {
+            setDoc((prev) => prev ? { ...prev, body: chunk.doc_body as string } : prev);
+          }
+        } else if (chunk.type === 'error') {
+          setChatMessages((prev) => [...prev, { role: 'assistant', text: 'Error: ' + (chunk.message || 'Unknown') }]);
+        }
+      }
     } catch (err) {
-      setChatMessages((prev) => [...prev, { role: 'assistant', text: 'Error: ' + (err instanceof ApiError ? err.messageText : String(err)) }]);
+      setChatMessages((prev) => [...prev, { role: 'assistant', text: 'Chat failed: ' + (err instanceof ApiError ? err.messageText : String(err)) }]);
     } finally {
       setChatLoading(false);
     }
