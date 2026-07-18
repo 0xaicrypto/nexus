@@ -305,52 +305,23 @@ jobs:
 
   # ── 5. SSH-deploy to the VPS (main only, after publish) ────────────
   deploy:
-    name: Deploy TS Server to VPS
+    name: Deploy to VPS
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
-      # GitHub will surface this in the Actions UI as a "production"
-      # deploy with timestamp + image tag. Required-reviewer rules can
-      # be added on the GitHub side later if we want manual approval
-      # before each deploy lands.
       name: production
       url: https://heurion.org/healthz
     steps:
-      - name: Configure SSH
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
-      - name: Add VPS host key
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
-
-      - name: Deploy TS Server to VPS
+      - name: Deploy
         env:
           DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          ssh -o StrictHostKeyChecking=no "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "bash -s" << ENDSSH
-            set -e
-            cd ~/heurion || { git clone https://github.com/0xaicrypto/heurion.git ~/heurion && cd ~/heurion; }
-            git pull origin main
-            cd packages/server-ts
-            [ -f .env ] || cat > .env << ENVEOF
-DATABASE_URL="file:./nexus_server.db"
-SERVER_PORT=8001
-SERVER_SECRET=\$(openssl rand -hex 32)
-DEEPSEEK_API_KEY=${DEEPSEEK_KEY}
-CORS_ALLOW_ORIGINS=*
-ENVEOF
-            which pnpm || npm install -g pnpm@10
-            pnpm install --frozen-lockfile
-            npx prisma generate
-            npx prisma db push --accept-data-loss
-            which pm2 || npm install -g pm2
-            pm2 delete heurion 2>/dev/null || true
-            pm2 start npx --name heurion -- tsx src/main.ts
-            pm2 save
-            sleep 3
-            curl -fsS http://localhost:8001/healthz && echo "OK" || echo "FAIL"
-ENDSSH
+          ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            DEEPSEEK_KEY="$DEEPSEEK_KEY" "bash -s" < scripts/deploy.sh
