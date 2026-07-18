@@ -4,9 +4,9 @@
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/node-22+-green.svg)](https://nodejs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-61DAFB.svg?logo=react&logoColor=black)](https://react.dev/)
-[![Status](https://img.shields.io/badge/status-test%20phase-orange.svg)](ROADMAP.md)
-[![Deploy](https://img.shields.io/badge/deploy-Docker%20%7C%20SaaS-2496ed.svg?logo=docker&logoColor=white)](docs/adr/ADR-003-web-ui-saas-pivot.md)
+[![Status](https://img.shields.io/badge/status-active-blue.svg)](ROADMAP.md)
 
 > **An AI for research should accumulate, not reset.**
 > *Runtime is temporary; identity is eternal.*
@@ -125,51 +125,39 @@ going well.
 │   (packages/web)        │   browser-first SaaS; mobile-ready
 ├─────────────────────────┤
 │  Desktop v2             │   Tauri 2.0 + React + TS (frozen)
-│   (packages/desktop-v2) │   spawns the server as a sidecar on
-└────────────┬────────────┘   127.0.0.1:8001
-             │ HTTP + JWT, SSE for /agent/chat
-┌────────────▼────────────┐
-│  Server (FastAPI)       │   password (bcrypt) + JWT auth, multi-tenant
-│   (packages/server)     │   plus the clinical workflow stack:
-│   one DigitalTwin per   │   patients, DICOM, MONAI, clinical
-│   logged-in user        │   event-sourcing graph, research
-│                         │   workspace, billing, scheduler,
-│                         │   vector index
+│   (packages/desktop-v2) │
 └────────────┬────────────┘
              │
 ┌────────────▼────────────┐
-│  Heurion framework      │   9-step chat loop (legacy /llm/chat)
-│   (packages/nexus)      │   ProjectionMemory (DPM)
-│   DigitalTwin           │   EvolutionEngine (4 evolvers +
-│                         │   VerdictRunner)
+│  @heurion/sdk           │   Typed client library
+│   (packages/sdk-client) │   Browser + Node.js + CLI
+│   HeurionClient + 10    │   AsyncGenerator for SSE
+│   typed modules         │
 └────────────┬────────────┘
-             │
+             │ HTTP + JWT, SSE
 ┌────────────▼────────────┐
-│  nexus_core SDK         │   AgentRuntime facade
-│   (packages/sdk)        │   EventLog + 5 stores
-│   ChainBackend          │   ContractEngine + DriftScore
-│                         │   BSCClient
+│  Server (TypeScript)    │   Fastify + Prisma + SQLite
+│   (packages/server-ts)  │   Auth/Patients/Research/Docs
+│   Modular architecture  │   Chat SSE + Evolution + Memory
 └────────────┬────────────┘
-             │
-             ▼
-          BSC RPC
-         (anchor)
+             │ gRPC / HTTP (optional)
+┌────────────▼────────────┐
+│  Python Worker          │   DICOM parsing + MONAI inference
+│   (packages/server)     │   Event-sourcing + Clinical graph
+│   + SDK (packages/sdk)  │   Vector search + OCR
+└─────────────────────────┘
 ```
 
-A second `packages/relay` Python service (Fly.io) handles webhook /
-outbound-email tasks the desktop sidecar can't reliably run.
+### 架构概览
 
-A user opens the web app, signs in, and starts chatting. The web UI
-supports both light and dark modes, Chinese and English, and works on
-desktop and mobile.
+Heurion 采用四层架构：
 
-### 中文概览
-
-Heurion 采用四层架构：浏览器端 React 界面（`packages/web`，新方向）、
-桌面端 Tauri 客户端（`packages/desktop-v2`，已冻结）、FastAPI 服务端
-（`packages/server`）、Heurion 框架层（`packages/nexus`）以及底层 SDK
-（`packages/sdk`）。所有临床工作流、记忆、进化与链上锚定都通过这一
-栈实现。Web UI 支持明暗主题、中英文切换，并适配移动端。
+| 层 | 包 | 技术栈 | 职责 |
+|---|---|---|---|
+| **Web UI** | `packages/web` | React + Vite | 浏览器端界面，明暗主题，中英文 |
+| **SDK** | `packages/sdk-client` | TypeScript | 10 个类型化模块，浏览器+CLI 共用 |
+| **Server** | `packages/server-ts` | Fastify + Prisma | 认证/对话/研究/文档/技能/管理 |
+| **Python Worker** | `packages/server` + `packages/sdk` | FastAPI + Python | DICOM/MONAI/事件溯源/向量搜索 |
 
 ---
 
@@ -271,11 +259,10 @@ that pin the canonical encoding live in
 
 | Layer | Knows about | Doesn't know about |
 |---|---|---|
-| `nexus_core` (SDK) | BSC web3, append-only logs, contract spec parsing, LLM provider abstraction | agents, users, HTTP, JWT |
-| `nexus` (framework) | DigitalTwin lifecycle, 9-step chat flow, evolution scheduling, projection mode | HTTP, JWT, multi-tenancy |
-| `nexus_server` | FastAPI routes, username + password (bcrypt) + JWT auth, one twin per user, view-shape APIs | how chat works inside a turn (delegated to `twin.chat()`) |
-| `packages/web` | React views, i18n, dark mode, responsive layout | persistence (server is the source of truth) |
-| `packages/desktop-v2` | Tauri views, view models, JWT lifetime | persistence (server is the source of truth) |
+| `@heurion/sdk` (sdk-client) | HTTP, JWT, SSE, 10 typed modules | DOM, React, rendering |
+| `server-ts` (TypeScript) | Fastify, Prisma, Auth, Business logic | DICOM, MONAI, medical imaging |
+| `server` + `sdk` (Python) | pydicom, MONAI, event-sourcing | HTTP, JWT, multi-tenancy |
+| `packages/web` | React views, i18n, dark mode, routing | persistence (server is source of truth) |
 
 Imports flow strictly downward — SDK never imports framework, framework
 never imports server, etc. This is the single most important property

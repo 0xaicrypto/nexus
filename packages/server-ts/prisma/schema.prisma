@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id
+  displayName     String    @map("display_name")
+  passwordHash    String?   @map("password_hash")
+  role            String    @default("user")
+  status          String    @default("approved")
+  email           String?
+  organization    String?
+  intendedUse     String?   @map("intended_use")
+  isAdmin         Int       @default(0) @map("is_admin")
+  tier            String    @default("beta")
+  stripeCustomerId String?  @map("stripe_customer_id")
+  stripeSubscriptionId String? @map("stripe_subscription_id")
+  subscriptionState String? @map("subscription_state")
+  trialEndsAt      String?  @map("trial_ends_at")
+  disabledAt       String?  @map("disabled_at")
+  lastLoginAt      String?  @map("last_login_at")
+  avatarEmoji      String?  @default("🩺") @map("avatar_emoji")
+  deletedAt        String?  @map("deleted_at")
+  createdAt        String   @map("created_at")
+  updatedAt        String   @map("updated_at")
+
+  sessions      Session[]
+  docs          Doc[]
+  skillPrefs    UserSkillPref[]
+  settings      UserSetting[]
+  chatTakeaways ChatTakeaway[]
+  studies       ResearchStudy[]
+  @@map("users")
+}
+
+model Session {
+  id             String   @id
+  userId         String   @map("user_id")
+  title          String
+  messageCount   Int      @default(0) @map("message_count")
+  archived       Int      @default(0)
+  createdAt      String   @map("created_at")
+  lastMessageAt  String?  @map("last_message_at")
+
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId, archived, lastMessageAt(sort: Desc)])
+  @@map("nexus_sessions")
+}
+
+model UserSetting {
+  userId    String @map("user_id")
+  key       String
+  value     String
+  updatedAt Int    @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+  @@id([userId, key])
+  @@map("user_settings")
+}
+
+model UserSkillPref {
+  userId     String @map("user_id")
+  skillName  String @map("skill_name")
+  enabled    Int    @default(1)
+  autoApply  Int    @default(0) @map("auto_apply")
+  source     String @default("")
+  createdAt  String @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+  @@id([userId, skillName])
+  @@map("user_skill_prefs")
+}
+
+model Doc {
+  id        String @id
+  userId    String @map("user_id")
+  title     String @default("")
+  body      String @default("")
+  createdAt String @map("created_at")
+  updatedAt String @map("updated_at")
+
+  user       User            @relation(fields: [userId], references: [id])
+  snapshots  DocSnapshot[]
+  references DocReference[]
+  chatMsgs   DocChatMessage[]
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("docs")
+}
+
+model DocSnapshot {
+  id        Int    @id @default(autoincrement())
+  docId     String @map("doc_id")
+  userId    String @map("user_id")
+  body      String
+  label     String @default("")
+  createdAt String @map("created_at")
+
+  doc Doc @relation(fields: [docId], references: [id])
+  @@index([userId, docId, id(sort: Desc)])
+  @@map("doc_snapshots")
+}
+
+model DocReference {
+  id           String @id
+  docId        String @map("doc_id")
+  userId       String @map("user_id")
+  refType      String @map("ref_type")
+  targetId     String @map("target_id")
+  granularity  String @default("")
+  snapshot     String @default("")
+  sourceNodes  String @default("[]") @map("source_nodes")
+  createdAt    String @map("created_at")
+
+  doc Doc @relation(fields: [docId], references: [id])
+  @@index([userId, docId, createdAt])
+  @@map("doc_references")
+}
+
+model DocChatMessage {
+  id         String @id
+  docId      String @map("doc_id")
+  userId     String @map("user_id")
+  role       String
+  text       String @default("")
+  docApplied Int    @default(0) @map("doc_applied")
+  createdAt  String @map("created_at")
+
+  doc Doc @relation(fields: [docId], references: [id])
+  @@index([userId, docId, createdAt])
+  @@map("doc_chat_messages")
+}
+
+model ChatTakeaway {
+  id              Int     @id @default(autoincrement())
+  userId          String  @map("user_id")
+  scopeKind       String  @map("scope_kind")
+  scopeRef        String  @map("scope_ref")
+  sessionId       String  @map("session_id")
+  text            String
+  tag             String?
+  confidence      Float   @default(0.7)
+  distilledAt     Int     @map("distilled_at")
+  sourceEventIdx  Int?    @map("source_event_idx")
+  medicAckedAt    Int?    @map("medic_acked_at")
+  medicRejectedAt Int?    @map("medic_rejected_at")
+
+  user User @relation(fields: [userId], references: [id])
+  @@index([userId, distilledAt(sort: Desc)])
+  @@index([userId, scopeKind, scopeRef, distilledAt(sort: Desc)])
+  @@map("chat_takeaways")
+}
+
+model ResearchStudy {
+  id        String @id
+  userId    String @map("user_id")
+  name      String
+  shortCode String @map("short_code")
+  protocol  String @default("{}")
+  createdAt String @map("created_at")
+  updatedAt String @map("updated_at")
+
+  user        User @relation(fields: [userId], references: [id])
+  enrollments ResearchEnrollment[]
+  screenings  ResearchScreening[]
+  observations ResearchObservation[]
+  assessments ResearchAssessment[]
+  @@index([userId, updatedAt(sort: Desc)])
+  @@map("research_studies")
+}
+
+model ResearchEnrollment {
+  studyId      String  @map("study_id")
+  patientHash  String  @map("patient_hash")
+  arm          String  @default("default")
+  enrolledAt   String  @map("enrolled_at")
+  unenrolledAt String? @map("unenrolled_at")
+
+  study ResearchStudy @relation(fields: [studyId], references: [id])
+  @@id([studyId, patientHash])
+  @@map("research_enrollments")
+}
+
+model ResearchScreening {
+  id          String @id
+  studyId     String @map("study_id")
+  patientHash String @map("patient_hash")
+  initials    String @default("")
+  verdict     String @default("pending")
+  reason      String @default("")
+  scannedAt   String @map("scanned_at")
+
+  study ResearchStudy @relation(fields: [studyId], references: [id])
+  @@index([studyId, patientHash])
+  @@map("research_screenings")
+}
+
+model ResearchObservation {
+  id          String @id
+  studyId     String @map("study_id")
+  patientHash String @map("patient_hash")
+  kind        String
+  grade       Int    @default(0)
+  dlt         Int    @default(0)
+  confirmed   Int    @default(0)
+  note        String @default("")
+  createdAt   String @map("created_at")
+
+  study ResearchStudy @relation(fields: [studyId], references: [id])
+  @@index([studyId, patientHash])
+  @@map("research_observations")
+}
+
+model ResearchAssessment {
+  id          String @id
+  studyId     String @map("study_id")
+  patientHash String @map("patient_hash")
+  visit       String
+  title       String
+  dueAt       String @map("due_at")
+  completedAt String? @map("completed_at")
+  note        String @default("")
+
+  study ResearchStudy @relation(fields: [studyId], references: [id])
+  @@index([studyId, patientHash])
+  @@map("research_assessments")
+}

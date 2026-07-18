@@ -1,5 +1,5 @@
 """
-Nexus — self-evolving Digital Twin layer for the BNBChain agent platform.
+Nexus — self-evolving Digital Twin agent framework.
 
 Built on top of :mod:`nexus_core` (the SDK). Nexus adds the
 agent runtime: ``DigitalTwin`` (compactor + chat loop + memory

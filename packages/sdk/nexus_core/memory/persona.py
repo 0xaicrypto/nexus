@@ -90,22 +90,10 @@ class PersonaStore:
     def __init__(
         self,
         base_dir: str | Path,
-        *,
-        chain_backend: Optional["StorageBackend"] = None,
     ):
         self._dir = Path(base_dir).resolve() / "persona"
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._versioned = VersionedStore(
-            self._dir,
-            chain_backend=chain_backend,
-            chain_namespace="persona" if chain_backend is not None else None,
-        )
-
-    async def recover_from_chain(self) -> int:
-        """Hydrate this store from chain. See
-        ``VersionedStore.recover_from_chain``.
-        """
-        return await self._versioned.recover_from_chain()
+        self._versioned = VersionedStore(self._dir)
 
     # ── Read API ─────────────────────────────────────────────────
 

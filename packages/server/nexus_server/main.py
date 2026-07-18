@@ -119,7 +119,6 @@ from nexus_server import (
     agent_state,
     auth,
     billing_routes,
-    chain_proxy,
     files,
     llm_gateway,
     sessions_router,
@@ -708,7 +707,6 @@ def create_app() -> FastAPI:
     from nexus_server import admin_router as _admin_router
     app.include_router(_admin_router.router)
     app.include_router(llm_gateway.router)
-    app.include_router(chain_proxy.router)
     # Stripe billing — checkout / portal / webhook / status. Routes
     # gracefully return 501 when STRIPE_SECRET_KEY isn't set, so the
     # router is always wired regardless of deployment mode.

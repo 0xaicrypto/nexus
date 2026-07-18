@@ -138,15 +138,15 @@ So a "memory" the user sees in the UI is a slice of the event log,
 re-derived on demand. The same log can be projected differently per
 turn — explicit recall ≠ background compact.
 
-## The on-chain anchor
+## The anchor
 
 Every event_log append in chain mode → durable data-store write.
 Periodically the agent's ChainBackend computes a content hash over
 recent state and calls `AgentStateExtension.updateStateRoot(token_id,
-hash)` on BSC. A third party with read access to the bucket can
+hash)` . A third party with read access to the bucket can
 recompute the hash and verify the agent's state is what it claims.
 
-Crucially, the on-chain anchor is over the **log**, not over a
+Crucially, the anchor is over the **log**, not over a
 projection. Whoever holds the bucket can replay every projection the
 agent ever computed if they want to — the projections themselves are
 events in the log too (`memory_compact`).

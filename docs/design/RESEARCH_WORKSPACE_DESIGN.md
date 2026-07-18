@@ -824,7 +824,7 @@ Research Chat 的每条 assistant 回答右侧（或下方折叠）显示一组*
 |---------|----------------------|
 | DigitalTwin per-user lazy create | 不动 —— 同一 twin 服务多个 scope |
 | EventLog 是 user 级 chained log | 不动 —— scope 只是事件 metadata 上的 tag |
-| Greenfield bucket 锚定 | 不动 —— 一个 twin 一个 bucket，scope 不影响存储 |
+| storage bucket 锚定 | 不动 —— 一个 twin 一个 bucket，scope 不影响存储 |
 | propose / commit / rollback | 不动 —— 同一通道，scope 只影响 evolver 决策 |
 | VerdictRunner 评分 | 增加 scope-aware 视角：研究 fact 的回溯证据看研究内多个患者，不再只看单患者轨迹 |
 | 5 namespace 边界 | 不动 —— 不新建 namespace；只在每条目加 scope_tags |

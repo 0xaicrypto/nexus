@@ -21,7 +21,6 @@ from .memory_evolver import MemoryEvolver
 from .persona_evolver import PersonaEvolver
 from .skill_evaluator import SkillEvaluator
 from .skill_evolver import SkillEvolver
-from .social_engine import SocialEngine
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +90,6 @@ class EvolutionEngine:
             # (canonical), not rune.memory anymore.
             facts_store=facts_store,
         )
-        self.social = SocialEngine(rune, agent_id, llm_fn, agent_name=agent_name)
 
         self._default_persona = default_persona
         self._turn_count = 0

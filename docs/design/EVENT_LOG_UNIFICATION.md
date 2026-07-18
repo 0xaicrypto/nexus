@@ -96,7 +96,7 @@ Both tables agree on event_kind names (`user_message`,
 Per-user file becomes a derived export. A periodic job (or "Export my
 data" button) reads the shared table filtered by `user_id` and emits a
 fresh per-user SQLite. For chain mode, this same exporter feeds
-Greenfield uploads.
+ uploads.
 
 ## Multi-tenant implications
 
@@ -112,7 +112,7 @@ The shared table already has the right shape for multi-tenant:
 This is the standard "multi-tenant single DB" pattern (Slack / Linear /
 Notion all run this way). The earlier "per-user file" approach was
 inherited from the chain-first design where each user's twin had its
-own ERC-8004 token + Greenfield bucket; that's still respected, but the
+own token + storage bucket; that's still respected, but the
 **read path** is no longer dependent on it.
 
 ## Regression test plan

@@ -1,10 +1,9 @@
 """
 Flush Policy & Write-Ahead Log — configurable write batching for Nexus.
 
-Three-layer write architecture:
+Two-layer write architecture:
   Layer 1 (Hot):  In-memory buffer + local WAL file    ← every event
   Layer 2 (Warm): object-store write                   ← batched every N events or T seconds
-  Layer 3 (Cold): BSC state_root anchor                ← batched with Layer 2, or on critical events
 
 The default FlushPolicy batches writes for performance. Users can override
 to sync every event (maximum safety) or flush only on explicit call
@@ -16,7 +15,7 @@ Usage:
     # Default: batch every 5 events or 30 seconds
     policy = FlushPolicy()
 
-    # Maximum safety: every event goes to chain
+    # Maximum safety: every event goes to store
     policy = FlushPolicy.sync_every()
 
     # Maximum control: only flush when you say so

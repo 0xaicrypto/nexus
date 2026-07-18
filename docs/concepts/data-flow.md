@@ -9,7 +9,7 @@ Assumes:
 - User has a registered server account.
 - `SERVER_PRIVATE_KEY` is set (chain mode).
 - User has been chatting for a while (twin already exists in memory,
-  has an ERC-8004 token).
+  has an token).
 
 ## Stage 1 — desktop sends
 
@@ -92,7 +92,7 @@ TwinManager._create_twin(user_id):
       _sessions[user_id] = TwinSession(twin)
 ```
 
-Cold start takes a few seconds on first ever chat (BSC ID lookup +
+Cold start takes a few seconds on first ever chat (ID lookup +
 session restore). Subsequent users hit the `_sessions` cache and skip
 all of this.
 
@@ -200,7 +200,7 @@ desktop fans out two parallel reads:
 
 - `GET /api/v1/agent/chain_status` — per-namespace 3-state status
   (`local` / `mirrored` / `anchored`) plus a chain-health card
-  (BSC anchor readiness).
+  (anchor readiness).
 - `GET /api/v1/agent/learning_summary?window=7d` — 7-day timeline
   + data-flow stage snapshot + just-learned feed.
 
@@ -211,14 +211,14 @@ EventLog window — no LLM calls, no chain traffic.
 
 After Stage 3 returns the reply, three things continue:
 
-1. **BSC anchors** (if scheduled) are still in flight.
+1. **anchors** (if scheduled) are still in flight.
 2. **Auto-compact** (if triggered): another LLM call producing a fresh
    `memory_compact` event, writes to event_log + emits
    `memory_compact` via on_event → twin_manager mirror writes
    `sync_events` row → `/agent/memories` next reads it.
 3. **Self-evolution** (every chat): MemoryEvolver / SkillEvolver run.
    Every 10 turns: PersonaEvolver fires, may rewrite persona.
-4. **State-root anchor** (periodic, not every turn): BSC `updateStateRoot`
+4. **State-root anchor** (periodic, not every turn): `updateStateRoot`
    tx. Costs gas. Captured by log handler →
    `twin_chain_events.kind='bsc_anchor', status='ok'` row.
 
@@ -240,11 +240,11 @@ every few seconds) will pick up the resulting events as they land.
 | event_log append response | ~1ms |
 | HTTP response → desktop | ~10ms |
 | **Total visible latency** | **~1.5s** |
-| Background BSC anchor (if fires) | ~1.5s |
+| Background anchor (if fires) | ~1.5s |
 
 ## What's NOT happening on each turn
 
-- BSC anchor — only periodic (every N turns OR when batch grows large enough).
+- anchor — only periodic (every N turns OR when batch grows large enough).
 - Auto-compact — only every ~20 turns AND when log >30k chars.
 - Persona reflection — only every 10 turns.
 - Identity registration — only first time the user ever chats.

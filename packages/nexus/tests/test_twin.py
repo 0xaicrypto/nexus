@@ -268,14 +268,6 @@ async def test_evolution_full_cycle():
     assert reflection["type"] == "reflection"
 
 
-@pytest.mark.asyncio
-async def test_task_delegation():
-    twin = make_twin()
-    await twin._initialize()
-    task_id = await twin.create_task("Book Tokyo flight", "booking")
-    learning = await twin.complete_task(task_id, "success", "comparison search")
-    assert isinstance(learning, dict)
-    await twin.close()
 
 
 @pytest.mark.asyncio

@@ -52,15 +52,6 @@ class TwinConfig:
 
     # ── Persistence ──
     base_dir: str = ".nexus"
-    use_chain: bool = False
-    private_key: str = ""
-
-    # ── Chain (BSC) ──
-    network: str = "testnet"  # "testnet" | "mainnet"
-    rpc_url: str = ""
-    agent_state_address: str = ""
-    task_manager_address: str = ""
-    identity_registry_address: str = ""
 
     # ── Persona (initial — will be evolved) ──
     base_persona: str = ""
@@ -92,7 +83,6 @@ You are a persistent, self-evolving AI avatar. Unlike ordinary chatbots, you:
 - REMEMBER everything across sessions — preferences, facts, decisions, context
 - LEARN from every interaction — your skills and knowledge grow over time
 - EVOLVE your behavior — you actively optimize how you communicate and assist
-- PERSIST on-chain — your identity and memories are verifiable on BNB Chain
 
 ## Behavior
 - Be concise and direct. Match the communication style of {owner} over time.

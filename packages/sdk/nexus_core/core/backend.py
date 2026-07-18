@@ -5,15 +5,14 @@ Defines HOW data is stored and retrieved. Each backend implements
 the same interface but with different storage engines:
 
     LocalBackend  — file-based, zero config, for development
-    ChainBackend  — local store + BSC anchoring, for production
     MockBackend   — in-memory, for unit tests
 
-Providers (SessionProvider, MemoryProvider, etc.) depend on this
-interface — they never know whether data goes to local files or chain.
+Providers (SessionProvider, ArtifactProvider, etc.) depend on this
+interface — they never know whether data goes to local files or in-memory.
 
 Design: Strategy Pattern
     - StorageBackend is the Strategy interface
-    - LocalBackend / ChainBackend / MockBackend are Concrete Strategies
+    - LocalBackend / MockBackend are Concrete Strategies
     - Providers are the Context that uses the Strategy
 """
 
@@ -32,13 +31,11 @@ class StorageBackend(ABC):
     Responsibilities:
       1. Store/load JSON payloads (sessions, memory indices, manifests)
       2. Store/load binary blobs (artifacts)
-      3. Anchor content hashes on-chain (BSC state_root updates)
-      4. Resolve anchored hashes (read back from chain)
 
     NOT responsible for:
-      - Domain logic (checkpoint linking, version management, semantic search)
-      - Framework-specific type conversions
-      - Flush batching (handled by FlushBuffer at the provider level)
+       - Domain logic (checkpoint linking, version management, semantic search)
+       - Framework-specific type conversions
+       - Flush batching (handled by FlushBuffer at the provider level)
     """
 
     # ── JSON payloads ───────────────────────────────────────────────
@@ -88,32 +85,6 @@ class StorageBackend(ABC):
         Load raw bytes by path.
 
         Returns None if the path does not exist.
-        """
-        ...
-
-    # ── On-chain anchoring ──────────────────────────────────────────
-
-    @abstractmethod
-    async def anchor(self, agent_id: str, content_hash: str, namespace: str = "state") -> None:
-        """
-        Anchor a content hash on-chain for verifiability.
-
-        In production: writes a 32-byte hash to BSC (AgentStateExtension).
-        In local mode: writes to a local JSON file.
-
-        Args:
-            agent_id: The agent's ERC-8004 ID.
-            content_hash: SHA-256 hex digest to anchor.
-            namespace: "state" or "memory" — which root to update.
-        """
-        ...
-
-    @abstractmethod
-    async def resolve(self, agent_id: str, namespace: str = "state") -> Optional[str]:
-        """
-        Resolve the current anchored hash for an agent.
-
-        Returns the latest content hash, or None if no state exists.
         """
         ...
 

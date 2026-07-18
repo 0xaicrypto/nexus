@@ -13,8 +13,7 @@ The high-level flow:
    thinks will be fixed, which it thinks may regress, and a
    rollback pointer so the change can be undone.
 2. The proposal is emitted as an ``evolution_proposal`` event
-   into the EventLog (and thus eventually into the on-chain
-   anchor manifest). The edit is then applied to storage.
+    into the EventLog. The edit is then applied to storage.
 3. After an observation window of ``expires_after_events`` events,
    the runner :func:`score_verdict` against the observed events,
    producing an :class:`EvolutionVerdict` with one of three

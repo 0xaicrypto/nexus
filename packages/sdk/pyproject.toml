@@ -4,58 +4,23 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nexus-core"
-version = "0.4.0"
-description = "Nexus SDK — Persistent, Verifiable Agent Infrastructure on BNB Chain (formerly bnbchain-agent)"
-# Per-package READMEs were consolidated into the root README.md.
+version = "0.5.0"
+description = "Nexus SDK — Persistent Agent Infrastructure"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
 dependencies = [
-    "web3>=6.15.0",
     "python-dotenv>=1.0.0",
     "requests>=2.31.0",
 ]
 
 [project.optional-dependencies]
-adk = ["google-adk>=1.18.0"]
-a2a = ["a2a-sdk>=0.2.0"]
-identity = ["bnbagent>=0.2.0"]
-all = [
-    "google-adk>=1.18.0",
-    "a2a-sdk>=0.2.0",
-    "bnbagent>=0.2.0",
-]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [tool.setuptools.packages.find]
 include = ["nexus_core*"]
 
 # ── Non-Python data files shipped inside the wheel ───────────────────
-# setuptools defaults to "Python files only" for installs, which silently
-# drops every non-.py file in the source tree. The chain client needs the
-# Solidity-compiled ABI JSONs at runtime to bind to BSC contracts:
-#
-#   nexus_core/chain.py:
-#     with open(Path(__file__).parent / "abi" / "AgentStateExtension.json") ...
-#
-# Without this declaration, `pip install ./packages/sdk` produces a
-# site-packages tree that has nexus_core/chain.py but NOT
-# nexus_core/abi/AgentStateExtension.json, and the server logs:
-#
-#   [WARNING] nexus_server.chain_proxy: Could not initialize BSCClient:
-#   [Errno 2] No such file or directory: '.../nexus_core/abi/AgentStateExtension.json'
-#   — falling back to mock.
-#
-# At which point every user falls into local-only mode despite the chain
-# being correctly configured. This regression bit production once already
-# (the auto-register path silently failed for all new signups). Don't
-# remove this without first relocating the ABIs to a runtime-downloadable
-# manifest.
 [tool.setuptools.package-data]
-# `nexus_core` itself = chain ABIs.
-# `nexus_core.skills` = curated MCP catalog (read by skills/manager.py:
-# `Path(__file__).parent / "curated_mcp.json"`). Same regression class as
-# the ABIs; bundling both at once.
-nexus_core        = ["abi/*.json"]
 "nexus_core.skills" = ["*.json"]
 
 [tool.pytest.ini_options]

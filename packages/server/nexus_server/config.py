@@ -5,7 +5,6 @@ Organized by functional area:
   - Server basics (host, port, environment)
   - Security (JWT, CORS)
   - LLM providers (keys and defaults)
-  - Blockchain (RPC, contracts)
   - Rate limiting
   - Database
 """
@@ -128,75 +127,6 @@ class ServerConfig:
         key = f"STRIPE_PRICE_{tier.upper()}_{cadence.upper()}"
         return getattr(self, key, None)
 
-    # ── Chain / Blockchain ─────────────────────────────────────────
-    # Server-owned custodial signing key. Used to sponsor on-chain ops
-    # for Web2 users who don't carry their own wallet. NOT the same as
-    # SDK's NEXUS_PRIVATE_KEY (which is per-agent / standalone use).
-    SERVER_PRIVATE_KEY: Optional[str] = os.getenv("SERVER_PRIVATE_KEY")
-
-    # Legacy / explicit overrides — if the operator wants to point chain
-    # ops at something different than what RUNE_*_RPC says.
-    CHAIN_RPC_URL: Optional[str] = os.getenv("CHAIN_RPC_URL")
-    CHAIN_AGENT_CONTRACT_ADDRESS: Optional[str] = os.getenv(
-        "CHAIN_AGENT_CONTRACT_ADDRESS"
-    )
-
-    # Network selection: "bsc-testnet" or "bsc-mainnet". Mirrors SDK's
-    # NEXUS_NETWORK.
-    NEXUS_NETWORK: str = os.getenv("NEXUS_NETWORK", "bsc-testnet")
-
-    # Network-level config: shared with SDK via dotenv fallback (see
-    # main._load_dotenv). These don't carry secrets.
-    NEXUS_TESTNET_RPC: Optional[str] = os.getenv(
-        "NEXUS_TESTNET_RPC",
-        "https://data-seed-prebsc-1-s1.bnbchain.org:8545",
-    )
-    NEXUS_TESTNET_AGENT_STATE_ADDRESS: Optional[str] = os.getenv(
-        "NEXUS_TESTNET_AGENT_STATE_ADDRESS"
-    )
-    NEXUS_TESTNET_TASK_MANAGER_ADDRESS: Optional[str] = os.getenv(
-        "NEXUS_TESTNET_TASK_MANAGER_ADDRESS"
-    )
-    NEXUS_TESTNET_IDENTITY_REGISTRY: Optional[str] = os.getenv(
-        "NEXUS_TESTNET_IDENTITY_REGISTRY"
-    )
-    NEXUS_MAINNET_RPC: Optional[str] = os.getenv(
-        "NEXUS_MAINNET_RPC",
-        "https://bsc-dataseed1.bnbchain.org",
-    )
-    NEXUS_MAINNET_IDENTITY_REGISTRY: Optional[str] = os.getenv(
-        "NEXUS_MAINNET_IDENTITY_REGISTRY"
-    )
-
-    @property
-    def network_short(self) -> str:
-        """Short-form network name ("testnet" / "mainnet") that the SDK
-        and twin expect.
-
-        Hoisted here so every module agrees on the mapping. Previously
-        each of ``twin_manager``, ``chain_proxy``, and ``sync_anchor``
-        rolled its own ``"mainnet" in network`` check — easy to drift,
-        easy to typo. Centralised so a single ``NEXUS_NETWORK`` validation
-        point covers everyone.
-        """
-        return "mainnet" if "mainnet" in (self.NEXUS_NETWORK or "").lower() else "testnet"
-
-    @property
-    def chain_active_rpc(self) -> Optional[str]:
-        """The RPC to use for the active network. CHAIN_RPC_URL wins if set."""
-        if self.CHAIN_RPC_URL:
-            return self.CHAIN_RPC_URL
-        return (
-            self.NEXUS_MAINNET_RPC
-            if self.network_short == "mainnet"
-            else self.NEXUS_TESTNET_RPC
-        )
-
-    @property
-    def chain_is_configured(self) -> bool:
-        """True iff we can attempt real on-chain calls (private key + RPC)."""
-        return bool(self.SERVER_PRIVATE_KEY and self.chain_active_rpc)
-
     # ── Twin (Nexus DigitalTwin) ────────────────────────────────────
     # When 1, /api/v1/llm/chat is served by a per-user DigitalTwin
     # instead of the direct LLM gateway. Default 1 because the user
@@ -216,27 +146,10 @@ class ServerConfig:
     )
 
     def validate(self) -> None:
-        """Validate configuration on startup.
-
-        Fails hard on misconfigurations that would silently corrupt
-        production behaviour; warns on missing optionals.
-        """
+        """Validate configuration on startup."""
         if self.ENVIRONMENT == "production":
             assert self.SERVER_SECRET != "dev-secret-key", (
                 "SERVER_SECRET must be set in production"
-            )
-
-        # Validate NEXUS_NETWORK loudly — a typo (e.g. "bsc_mainnet" with
-        # underscore, or "mainet") used to silently fall back to testnet
-        # via the ``"mainnet" in network`` substring check. That meant
-        # production traffic could end up anchoring to the wrong chain
-        # without any warning. We now whitelist the canonical values.
-        valid_networks = {"bsc-testnet", "bsc-mainnet"}
-        if self.NEXUS_NETWORK not in valid_networks:
-            raise ValueError(
-                f"NEXUS_NETWORK must be one of {sorted(valid_networks)}, "
-                f"got {self.NEXUS_NETWORK!r}. (Common mistakes: 'bsc_testnet' "
-                f"with underscore, or 'mainet' typo — both fail.)"
             )
 
         if not self.GEMINI_API_KEY and \

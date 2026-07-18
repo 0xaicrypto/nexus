@@ -149,37 +149,16 @@ class EpisodesStore:
     def __init__(
         self,
         base_dir: str | Path,
-        *,
-        chain_backend: Optional["StorageBackend"] = None,
     ):
-        """
-        Args:
-            base_dir: Parent directory. The store creates / uses
-                ``{base_dir}/episodes/`` for its files.
-            chain_backend: Optional storage backend used by the
-                underlying ``VersionedStore`` to mirror committed
-                versions. See ``VersionedStore`` docstring.
-        """
         self._dir = Path(base_dir).resolve() / "episodes"
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._versioned = VersionedStore(
-            self._dir,
-            chain_backend=chain_backend,
-            chain_namespace="episodes" if chain_backend is not None else None,
-        )
+        self._versioned = VersionedStore(self._dir)
         # Bootstrap: if no working file but a committed version exists,
         # seed working from current. (First-time open after restart.)
         if not self._working_path().exists():
             committed = self._versioned.current()
             if committed is not None:
                 self._write_working(committed)
-
-    async def recover_from_chain(self) -> int:
-        n = await self._versioned.recover_from_chain()
-        committed = self._versioned.current()
-        if committed is not None:
-            self._write_working(committed)
-        return n
 
     # ── Read API ─────────────────────────────────────────────────
 

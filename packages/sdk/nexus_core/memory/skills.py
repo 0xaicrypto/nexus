@@ -121,32 +121,14 @@ class SkillsStore:
     def __init__(
         self,
         base_dir: str | Path,
-        *,
-        chain_backend: Optional["StorageBackend"] = None,
     ):
         self._dir = Path(base_dir).resolve() / "skills"
         self._dir.mkdir(parents=True, exist_ok=True)
-        self._versioned = VersionedStore(
-            self._dir,
-            chain_backend=chain_backend,
-            chain_namespace="skills" if chain_backend is not None else None,
-        )
+        self._versioned = VersionedStore(self._dir)
         if not self._working_path().exists():
             committed = self._versioned.current()
             if committed is not None:
                 self._write_working(committed)
-
-    async def recover_from_chain(self) -> int:
-        """Hydrate this store from chain. Forwarded to the
-        underlying ``VersionedStore``. After hydrate, the working
-        file is reseeded from ``current()`` so chat-time reads
-        immediately see the recovered state.
-        """
-        n = await self._versioned.recover_from_chain()
-        committed = self._versioned.current()
-        if committed is not None:
-            self._write_working(committed)
-        return n
 
     # ── Read ────────────────────────────────────────────────────
 

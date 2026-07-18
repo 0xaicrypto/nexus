@@ -1,8 +1,0 @@
-{
-  "network": "bscTestnet",
-  "identityRegistry": "0x8004A818BFB912233c491871b3d84c89A494BD9e",
-  "agentStateExtension": "0x10d87b8A82E86923c3d8D617888e47af6C1813D4",
-  "taskStateManager": "0x892Ee992c352b3E69d52b3449460E4dddC291293",
-  "deployedAt": "2026-04-13T14:09:37.839Z",
-  "deployer": "0x4CfDcba1b28C244c793e67C591118C34a7d022AF"
-}

@@ -7,12 +7,9 @@ Built-in tools:
   - ReadUploadedFileTool: Read uploaded file content by section
   - SkillInstallerTool: Search + install Anthropic-style skills (LobeHub)
   - McpInstallerTool: Search + install MCP servers (LobeHub)
-  - BscQueryTool: Direct read-only BSC chain queries via Web3 RPC
 """
 
 from .base import BaseTool, ToolCall, ToolRegistry, ToolResult
-from .bsc_query import BscQueryTool
-from .chain_query import ChainQueryTool
 from .file_generator import FileGeneratorTool
 from .file_reader import ReadUploadedFileTool
 from .skill_installer import McpInstallerTool, SkillInstallerTool
@@ -24,5 +21,4 @@ __all__ = [
     "WebSearchTool", "URLReaderTool", "FileGeneratorTool",
     "ReadUploadedFileTool",
     "SkillInstallerTool", "McpInstallerTool",
-    "BscQueryTool", "ChainQueryTool",
 ]

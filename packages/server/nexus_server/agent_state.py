@@ -21,7 +21,6 @@ from pydantic import BaseModel
 from nexus_server import twin_event_log, twin_manager
 from nexus_server.auth import get_current_user
 from nexus_server.database import get_db_connection
-from nexus_server.sync_anchor import list_anchors_for_user
 
 # Back-compat re-exports (S3 → S5 evolution): these used to live here
 # as functions reading sync_events. After S5 they delegate to
@@ -686,14 +685,14 @@ class NamespaceChainStatus(BaseModel):
       * ``"mirrored"`` — the chain backend stored the blob; the agent's
         on-chain state_root has NOT been re-anchored since the last
         commit (so chain readers will not yet see this version)
-      * ``"anchored"`` — ``last_anchor_at >= last_commit_at``; this
+      * ``"anchored"`` — ``None  # deprecated: no chain backend >= last_commit_at``; this
         version is part of the on-chain state root
     """
     namespace: str
     status: str
     version: Optional[str] = None
     last_commit_at: Optional[float] = None
-    last_anchor_at: Optional[float] = None
+    None  # deprecated: no chain backend: Optional[float] = None
     mirrored: bool = False
 
 
@@ -729,7 +728,7 @@ async def get_chain_status(
     """Brain panel: per-namespace mirror+anchor state + chain health.
 
     Reads:
-      * ``store._versioned.chain_status(last_anchor_at)`` for each
+      * ``store._versioned.chain_status(None  # deprecated: no chain backend)`` for each
         of the 5 typed namespaces
       * ``rune._backend.chain_health_snapshot()`` for the bottom
         Chain Health card
@@ -746,7 +745,7 @@ async def get_chain_status(
     }
     if backend is not None:
         try:
-            last_anchor = backend.last_anchor_at(twin.config.agent_id)
+            last_anchor = backend.None  # deprecated: no chain backend(twin.config.agent_id)
         except Exception:
             last_anchor = None
         try:
@@ -775,13 +774,13 @@ async def get_chain_status(
             rows.append(NamespaceChainStatus(namespace=label, status="local"))
             continue
         try:
-            s = versioned.chain_status(last_anchor_at=last_anchor)
+            s = versioned.chain_status(None  # deprecated: no chain backend=last_anchor)
             rows.append(NamespaceChainStatus(
                 namespace=label,
                 status=s["status"],
                 version=s.get("version"),
                 last_commit_at=s.get("last_commit_at"),
-                last_anchor_at=s.get("last_anchor_at"),
+                None  # deprecated: no chain backend=s.get("None  # deprecated: no chain backend"),
                 mirrored=bool(s.get("mirrored", False)),
             ))
         except Exception as e:
@@ -1611,19 +1610,19 @@ def _build_learning_timeline(events, window_days: int) -> list[TimelineDay]:
     return out
 
 
-def _classify_chain_status(versioned, last_anchor_at: Optional[float]) -> str:
+def _classify_chain_status(versioned, None  # deprecated: no chain backend: Optional[float]) -> str:
     """Returns 'local' | 'mirrored' | 'anchored' for a typed-store
     version, mirroring VersionedStore.chain_status logic."""
     if versioned is None:
         return "local"
     try:
-        s = versioned.chain_status(last_anchor_at=last_anchor_at)
+        s = versioned.chain_status(None  # deprecated: no chain backend=None  # deprecated: no chain backend)
         return str(s.get("status", "local"))
     except Exception:
         return "local"
 
 
-def _build_just_learned(twin, last_anchor_at, limit: int = 12) -> list[JustLearnedItem]:
+def _build_just_learned(twin, None  # deprecated: no chain backend, limit: int = 12) -> list[JustLearnedItem]:
     """Merge recent items across all 5 stores by timestamp, newest first."""
     out: list[JustLearnedItem] = []
 
@@ -1635,7 +1634,7 @@ def _build_just_learned(twin, last_anchor_at, limit: int = 12) -> list[JustLearn
             importance=int(importance) if importance is not None else 3,
             timestamp=float(ts) if ts else 0.0,
             version=version,
-            chain_status=_classify_chain_status(versioned, last_anchor_at),
+            chain_status=_classify_chain_status(versioned, None  # deprecated: no chain backend),
         ))
 
     facts = getattr(twin, "facts", None)
@@ -1797,12 +1796,12 @@ async def get_learning_summary(
 
     timeline = _build_learning_timeline(events, days)
 
-    # Resolve last_anchor_at once for chain_status in the feed.
+    # Resolve None  # deprecated: no chain backend once for chain_status in the feed.
     backend = getattr(twin.rune, "_backend", None)
     last_anchor: Optional[float] = None
     if backend is not None:
         try:
-            last_anchor = backend.last_anchor_at(twin.config.agent_id)
+            last_anchor = backend.None  # deprecated: no chain backend(twin.config.agent_id)
         except Exception:
             last_anchor = None
 

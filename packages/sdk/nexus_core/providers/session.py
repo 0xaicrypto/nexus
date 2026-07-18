@@ -4,7 +4,6 @@ SessionProviderImpl — concrete SessionProvider backed by StorageBackend.
 Domain logic:
   - Checkpoint parent linking (builds a history chain)
   - In-memory cache for fast reads
-  - On-chain anchoring after each save
   - Path management for the storage layout
 
 Storage layout:
@@ -62,10 +61,7 @@ class SessionProviderImpl(SessionProvider):
 
         # Persist via backend
         path = self._path(checkpoint.agent_id, checkpoint.thread_id, checkpoint.checkpoint_id)
-        content_hash = await self._backend.store_json(path, checkpoint.to_dict())
-
-        # Anchor on-chain
-        await self._backend.anchor(checkpoint.agent_id, content_hash, namespace="state")
+        await self._backend.store_json(path, checkpoint.to_dict())
 
         return checkpoint.checkpoint_id
 
@@ -85,29 +81,26 @@ class SessionProviderImpl(SessionProvider):
                 if cp.checkpoint_id == checkpoint_id:
                     return cp
 
-        # Try loading from backend via anchor
-        state_hash = await self._backend.resolve(agent_id, namespace="state")
-        if state_hash:
-            # List paths under this thread to find checkpoints
-            prefix = f"agents/{self._safe(agent_id)}/sessions/{self._safe(thread_id)}/"
-            paths = await self._backend.list_paths(prefix)
-            if paths:
-                # Load the last one (most recent by path sort)
-                target = paths[-1] if checkpoint_id is None else None
-                for p in paths:
-                    if checkpoint_id and p.endswith(f"/{checkpoint_id}.json"):
-                        target = p
-                        break
-                if target:
-                    data = await self._backend.load_json(target)
-                    if data:
-                        cp = Checkpoint.from_dict(data)
-                        if key not in self._checkpoints:
-                            self._checkpoints[key] = []
-                        # Avoid duplicate entries in cache
-                        if not any(c.checkpoint_id == cp.checkpoint_id for c in self._checkpoints[key]):
-                            self._checkpoints[key].append(cp)
-                        return cp
+        # Try loading from backend
+        prefix = f"agents/{self._safe(agent_id)}/sessions/{self._safe(thread_id)}/"
+        paths = await self._backend.list_paths(prefix)
+        if paths:
+            # Load the last one (most recent by path sort)
+            target = paths[-1] if checkpoint_id is None else None
+            for p in paths:
+                if checkpoint_id and p.endswith(f"/{checkpoint_id}.json"):
+                    target = p
+                    break
+            if target:
+                data = await self._backend.load_json(target)
+                if data:
+                    cp = Checkpoint.from_dict(data)
+                    if key not in self._checkpoints:
+                        self._checkpoints[key] = []
+                    # Avoid duplicate entries in cache
+                    if not any(c.checkpoint_id == cp.checkpoint_id for c in self._checkpoints[key]):
+                        self._checkpoints[key].append(cp)
+                    return cp
 
         return None
 

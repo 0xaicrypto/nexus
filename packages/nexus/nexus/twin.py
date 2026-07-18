@@ -5,7 +5,7 @@ Startup flow:
   1. If chain mode (private_key provided):
      a. Connect to BSC via nexus_core.testnet() / nexus_core.mainnet()
      b. Register ERC-8004 identity (one-time, auto-detected)
-     c. All data persists locally and anchors to BSC
+      c. All data persists locally
   2. If local mode (no private_key):
      a. Use nexus_core.local()
      b. All data persists to local files
@@ -31,7 +31,6 @@ from .evolution.engine import EvolutionEngine
 from .tools.base import ExtendedToolRegistry
 
 logger = logging.getLogger(__name__)
-
 
 class DigitalTwin:
     """
@@ -73,10 +72,6 @@ class DigitalTwin:
         # emit is a no-op), so call sites don't need null checks.
         self.thinking = ThinkingEmitter()
 
-        # ERC-8004 identity (set after on-chain registration)
-        self._erc8004_agent_id: Optional[int] = None
-        self._chain_client = None
-
         # Tool registry — tools are registered after creation via register_tool()
         self.tools = ExtendedToolRegistry()
         self._file_reader = None  # Set by _register_default_tools
@@ -107,27 +102,11 @@ class DigitalTwin:
         # evolution verdict scorer can roll back individual namespaces
         # without touching the rest.
         #
-        # Phase D: each store is wired to the AgentRuntime's storage
-        # backend so committed versions get mirrored to chain via
-        # VersionedStore's fire-and-forget chain mirror. A fresh
-        # server with no local data can ``await store.recover_from_chain()``
-        # to rehydrate.
-        chain_backend = getattr(rune, "_backend", None)
-        self.episodes = EpisodesStore(
-            base_dir=config.base_dir, chain_backend=chain_backend,
-        )
-        self.facts = FactsStore(
-            base_dir=config.base_dir, chain_backend=chain_backend,
-        )
-        self.skills_memory = SkillsStore(
-            base_dir=config.base_dir, chain_backend=chain_backend,
-        )
-        self.persona_store = PersonaStore(
-            base_dir=config.base_dir, chain_backend=chain_backend,
-        )
-        self.knowledge = KnowledgeStore(
-            base_dir=config.base_dir, chain_backend=chain_backend,
-        )
+        self.episodes = EpisodesStore(base_dir=config.base_dir)
+        self.facts = FactsStore(base_dir=config.base_dir)
+        self.skills_memory = SkillsStore(base_dir=config.base_dir)
+        self.persona_store = PersonaStore(base_dir=config.base_dir)
+        self.knowledge = KnowledgeStore(base_dir=config.base_dir)
 
         # Compactor initialized after LLM (needs projection_fn)
         self._compactor = None
@@ -189,25 +168,8 @@ class DigitalTwin:
         enable_tools: bool = True,
         tavily_api_key: str = "",
         jina_api_key: str = "",
-        # ── Chain mode ──
-        private_key: str = "",
-        network: str = "testnet",
-        rpc_url: str = "",
-        agent_state_address: str = "",
-        task_manager_address: str = "",
-        identity_registry_address: str = "",
-        # When the caller has already registered the agent on chain (e.g.
-        # server's TwinManager runs ``bootstrap_chain_identity`` before
-        # creating the twin), pass the assigned ERC-8004 token id here.
-        # The twin will pre-populate its identity cache file with this
-        # value and skip its own background ``_register_identity`` task,
-        # avoiding the double-registration race that mints a second token
-        # and leaves the bucket name out-of-sync with the on-chain state.
-        cached_agent_id: Optional[int] = None,
-        cached_wallet: str = "",
     ) -> "DigitalTwin":
         provider = LLMProvider(llm_provider)
-        use_chain = bool(private_key)
 
         config = TwinConfig(
             agent_id=agent_id,
@@ -217,35 +179,10 @@ class DigitalTwin:
             llm_api_key=llm_api_key,
             llm_model=llm_model or "",
             base_dir=base_dir,
-            use_chain=use_chain,
-            private_key=private_key,
-            network=network,
-            rpc_url=rpc_url,
-            agent_state_address=agent_state_address,
-            task_manager_address=task_manager_address,
-            identity_registry_address=identity_registry_address,
         )
 
-        # ── Create Rune provider ──
-        if use_chain:
-            chain_kwargs = {}
-            if rpc_url:
-                chain_kwargs["rpc_url"] = rpc_url
-            if agent_state_address:
-                chain_kwargs["agent_state_address"] = agent_state_address
-            if task_manager_address:
-                chain_kwargs["task_manager_address"] = task_manager_address
-            if identity_registry_address:
-                chain_kwargs["identity_registry_address"] = identity_registry_address
-
-            if "mainnet" in network:
-                rune = nexus_core.mainnet(private_key=private_key, **chain_kwargs)
-            else:
-                rune = nexus_core.testnet(private_key=private_key, **chain_kwargs)
-            logger.info("Chain mode: BSC %s anchoring", network)
-        else:
-            rune = nexus_core.local(base_dir=base_dir)
-            logger.info("Local mode: data stored in %s", base_dir)
+        rune = nexus_core.local(base_dir=base_dir)
+        logger.info("Local mode: data stored in %s", base_dir)
 
         llm = LLMClient(
             provider=config.llm_provider,
@@ -254,28 +191,6 @@ class DigitalTwin:
         )
 
         twin = cls(config=config, rune=rune, llm=llm)
-
-        # ── Pre-seed identity cache if caller already registered ──────
-        # When TwinManager's bootstrap_chain_identity has already minted
-        # the ERC-8004 token, write it into the twin's local cache file
-        # BEFORE _initialize() runs. _initialize then loads the cache
-        # synchronously, sets _erc8004_agent_id, and skips firing the
-        # _register_identity background task. Net effect: zero extra
-        # on-chain registration, single source of truth for the bucket
-        # name (token_id from server's DB).
-        if use_chain and cached_agent_id is not None:
-            try:
-                twin._save_identity_cache(int(cached_agent_id), cached_wallet or "")
-                logger.info(
-                    "Pre-seeded ERC-8004 identity cache: agentId=%s (skip self-register)",
-                    cached_agent_id,
-                )
-            except Exception as e:
-                # Non-fatal: if cache write fails, twin will fall back to
-                # its own registration path. Worst case: a duplicate
-                # registration tx — which is exactly the bug we're trying
-                # to avoid, but the system still works.
-                logger.warning("Pre-seed identity cache failed: %s", e)
 
         # ── Register default tools ──
         if enable_tools:
@@ -295,35 +210,7 @@ class DigitalTwin:
         if self._initialized:
             return
 
-        # ── Step 1: Identity — use cache or fire-and-forget chain registration ──
-        if self.config.use_chain and self.config.private_key:
-            cached = self._load_identity_cache()
-            if cached:
-                # Instant: load from local cache, no chain call
-                self._erc8004_agent_id = cached["erc8004_id"]
-                self._emit("identity_found", {
-                    "agent_id": self.config.agent_id,
-                    "erc8004_id": cached["erc8004_id"],
-                    "network": self.config.network,
-                    "wallet": cached.get("wallet", ""),
-                    "source": "cache",
-                })
-                logger.info(
-                    "ERC-8004 identity loaded from cache: agentId=%s",
-                    cached["erc8004_id"],
-                )
-                # Create chain_client in background (non-blocking)
-                self._bg_task("chain-client-init", self._init_chain_client_async())
-            else:
-                # No cache: fire-and-forget registration in background
-                self._emit("identity_check", {
-                    "agent_id": self.config.agent_id,
-                    "network": self.config.network,
-                    "source": "background",
-                })
-                self._bg_task("identity-register", self._register_identity())
-
-        # ── Step 2: Initialize evolution engine (persona + skills + knowledge + memory) ──
+        # ── Step 1: Initialize evolution engine (persona + skills + knowledge + memory) ──
         # Memory preloading is included in initialize() to avoid cold-start timeouts
         # during the first chat() call. Cold-start loads can be slow, so we give
         # generous time here (10s). If it still times out, memories will
@@ -447,9 +334,9 @@ class DigitalTwin:
         backend = getattr(self.rune, "_backend", None)
 
         # Phase A2: hook the ThinkingEmitter to the EventLog (and
-        # ChainBackend's blob writer when chain mode is active) so
+        # backend writer when active) so
         # every step the agent reasons about now flows into the
-        # audit trail AND into the next BSC state-root anchor.
+        # audit trail.
         # Pre-existing in-process SSE delivery is preserved — the
         # double-write is additive.
         try:
@@ -687,151 +574,6 @@ class DigitalTwin:
 
         self._bg_task("vector_embed_turn", _embed_all())
 
-    async def _init_chain_client_async(self) -> None:
-        """Initialize chain_client in background (non-blocking startup)."""
-        try:
-            from nexus_core.chain import BSCClient
-            cfg = self.config
-            net_prefix = "MAINNET" if "mainnet" in cfg.network else "TESTNET"
-            rpc_url = cfg.rpc_url or os.environ.get(f"NEXUS_{net_prefix}_RPC", "")
-            agent_state_addr = cfg.agent_state_address or os.environ.get(f"NEXUS_{net_prefix}_AGENT_STATE_ADDRESS", "")
-            identity_registry_addr = (
-                cfg.identity_registry_address
-                or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY", "")
-                or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY_ADDRESS", "")
-            )
-            task_manager_addr = cfg.task_manager_address or os.environ.get(f"NEXUS_{net_prefix}_TASK_MANAGER_ADDRESS", "")
-
-            if rpc_url:
-                self._chain_client = BSCClient(
-                    rpc_url=rpc_url,
-                    private_key=cfg.private_key,
-                    agent_state_address=agent_state_addr or None,
-                    task_manager_address=task_manager_addr or None,
-                    identity_registry_address=identity_registry_addr or None,
-                    network=f"bsc_{cfg.network}",
-                )
-        except Exception as e:
-            logger.debug("Background chain client init failed: %s", e)
-
-    # ── ERC-8004 Registration ───────────────────────────────────
-
-    # ── ERC-8004 Identity Cache ──────────────────────────────────
-
-    def _identity_cache_path(self) -> Path:
-        """Local file that caches the ERC-8004 agent ID after first registration."""
-        cache_dir = Path(os.environ.get("NEXUS_CACHE_DIR", ".rune_cache"))
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        safe_id = self.config.agent_id.replace("/", "_").replace("\\", "_")
-        return cache_dir / f"identity_{safe_id}_{self.config.network}.json"
-
-    def _load_identity_cache(self) -> Optional[dict]:
-        """Load cached identity from local file. Returns None on miss."""
-        try:
-            path = self._identity_cache_path()
-            if path.exists():
-                data = json.loads(path.read_text())
-                if data.get("agent_id") == self.config.agent_id:
-                    return data
-        except Exception as e:
-            logger.debug("Identity cache read failed: %s", e)
-        return None
-
-    def _save_identity_cache(self, erc8004_id: int, wallet: str) -> None:
-        """Save identity to local cache after successful registration/verification."""
-        try:
-            path = self._identity_cache_path()
-            path.write_text(json.dumps({
-                "agent_id": self.config.agent_id,
-                "erc8004_id": erc8004_id,
-                "network": self.config.network,
-                "wallet": wallet,
-            }))
-        except Exception as e:
-            logger.debug("Identity cache write failed: %s", e)
-
-    async def _register_identity(self):
-        """
-        Background task: register ERC-8004 identity on BSC.
-
-        Called as fire-and-forget from _initialize() when no local cache exists.
-        On success, caches the identity locally so next startup is instant.
-        """
-        try:
-            from nexus_core.chain import BSCClient
-        except ImportError:
-            logger.warning("web3 not installed — skipping ERC-8004 registration")
-            return
-
-        cfg = self.config
-        net_prefix = "MAINNET" if "mainnet" in cfg.network else "TESTNET"
-
-        rpc_url = cfg.rpc_url or os.environ.get(f"NEXUS_{net_prefix}_RPC", "")
-        agent_state_addr = cfg.agent_state_address or os.environ.get(f"NEXUS_{net_prefix}_AGENT_STATE_ADDRESS", "")
-        identity_registry_addr = (
-            cfg.identity_registry_address
-            or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY", "")
-            or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY_ADDRESS", "")
-        )
-        task_manager_addr = cfg.task_manager_address or os.environ.get(f"NEXUS_{net_prefix}_TASK_MANAGER_ADDRESS", "")
-
-        if not rpc_url or not identity_registry_addr:
-            logger.warning("No BSC RPC or Identity Registry configured — skipping registration")
-            return
-
-        try:
-            chain_client = BSCClient(
-                rpc_url=rpc_url,
-                private_key=cfg.private_key,
-                agent_state_address=agent_state_addr or None,
-                task_manager_address=task_manager_addr or None,
-                identity_registry_address=identity_registry_addr,
-                network=f"bsc_{cfg.network}",
-            )
-            self._chain_client = chain_client
-
-            agent_uri = f"rune-twin://{cfg.agent_id}"
-            numeric_id = abs(hash(cfg.agent_id)) % (2**32)
-
-            already_exists = chain_client.agent_exists(numeric_id)
-            success, actual_id = chain_client.ensure_agent_registered(
-                agent_id=numeric_id,
-                agent_name=agent_uri,
-            )
-
-            if success:
-                self._erc8004_agent_id = actual_id
-                self._save_identity_cache(actual_id, chain_client.address)
-
-                event = "identity_found" if already_exists else "identity_registered"
-                self._emit(event, {
-                    "agent_id": cfg.agent_id,
-                    "erc8004_id": actual_id,
-                    "network": cfg.network,
-                    "wallet": chain_client.address,
-                })
-                logger.info(
-                    "ERC-8004 identity %s: agentId=%s (name=%s)",
-                    "found" if already_exists else "registered",
-                    actual_id, cfg.agent_id,
-                )
-            else:
-                self._emit("sync_error", {
-                    "component": "ERC-8004",
-                    "error": "Registration failed — run /sync to retry",
-                })
-                logger.warning("ERC-8004 registration failed for %s — local-only mode", cfg.agent_id)
-
-        except Exception as e:
-            self._emit("sync_error", {
-                "component": "ERC-8004",
-                "error": str(e),
-                "hint": "Run /sync to retry",
-            })
-            logger.warning("ERC-8004 registration error (background): %s", e)
-
-    # ── Background Session Recovery ─────────────────────────────
-
     async def _recover_old_session(self) -> None:
         """
         Background: load old session from the backend and extract memories.
@@ -877,7 +619,7 @@ class DigitalTwin:
                 self._emit("memory_stored", {
                     "count": len(old_messages),
                     "items": [f"Recovered from previous session ({old.thread_id})"],
-                    "storage": "chain" if self.config.use_chain else "local",
+                    "storage": "local",
                 })
             except asyncio.TimeoutError:
                 logger.warning("Memory extraction from recovered session timed out")
@@ -902,49 +644,11 @@ class DigitalTwin:
     # ── Identity Context for LLM ───────────────────────────────
 
     def _build_identity_context(self) -> str:
-        """Build on-chain identity context so the twin knows its own registration details.
-
-        This is injected into the system prompt during chat() so the twin can
-        answer questions like 'what's your agent ID?', 'what chain are you on?',
-        'what's your wallet address?', etc.
-        """
-        parts = ["## Your On-Chain Identity"]
+        """Build identity context for the system prompt."""
+        parts = ["## Your Identity"]
         parts.append(f"- Agent Name: {self.config.name}")
         parts.append(f"- Agent ID: {self.config.agent_id}")
-
-        if self.config.use_chain:
-            parts.append(f"- Network: BNB Chain ({self.config.network})")
-            parts.append("- Storage: local data store, state roots anchored on BSC")
-
-            if self._erc8004_agent_id is not None:
-                parts.append(f"- ERC-8004 Token ID: {self._erc8004_agent_id}")
-                parts.append("- Registration Status: REGISTERED on-chain")
-            else:
-                parts.append("- ERC-8004 Token ID: Pending registration")
-
-            if self._chain_client:
-                parts.append(f"- Wallet Address: {self._chain_client.address}")
-
-            # Include contract addresses if available
-            cached = self._load_identity_cache()
-            if cached and cached.get("wallet"):
-                if not self._chain_client:
-                    parts.append(f"- Wallet Address: {cached['wallet']}")
-
-            cfg = self.config
-            net_prefix = "MAINNET" if "mainnet" in cfg.network else "TESTNET"
-            agent_state_addr = cfg.agent_state_address or os.environ.get(f"NEXUS_{net_prefix}_AGENT_STATE_ADDRESS", "")
-            identity_registry_addr = (
-                cfg.identity_registry_address
-                or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY", "")
-                or os.environ.get(f"NEXUS_{net_prefix}_IDENTITY_REGISTRY_ADDRESS", "")
-            )
-            if agent_state_addr:
-                parts.append(f"- AgentState Contract: {agent_state_addr}")
-            if identity_registry_addr:
-                parts.append(f"- Identity Registry Contract: {identity_registry_addr}")
-        else:
-            parts.append("- Storage: Local (not connected to chain)")
+        parts.append("- Storage: Local")
 
         return "\n".join(parts)
 
@@ -1599,7 +1303,7 @@ class DigitalTwin:
                 # onto each compaction. Compaction is a natural
                 # quiescent moment — the projection just ran, the
                 # event log is in a consistent shape, and the
-                # ChainBackend is already firing a write-behind
+                # Backend is already firing a write-behind
                 # for the memory_compact event itself. Snapshot
                 # cadence ≈ compact_interval × ~20 turns, so a
                 # reasonable bound on bytes-on-chain even for
@@ -1644,7 +1348,7 @@ class DigitalTwin:
         memories from that turn were permanently lost. By extracting first, we
         ensure memories are stored before the session checkpoint references them.
         """
-        storage = "chain" if self.config.use_chain else "local"
+        storage = "local"
 
         # ── 1. Extract and store memories FIRST ──
         self._emit("memory_extract", {"turn": self._turn_count})
@@ -1742,8 +1446,8 @@ class DigitalTwin:
             metadata={
                 "twin_name": self.config.name,
                 "persona_version": self.evolution.persona.persona_store.current_version(),
-                "erc8004_agent_id": self._erc8004_agent_id,
-                "storage_mode": "chain" if self.config.use_chain else "local",
+                "erc8004_agent_id": None,
+                "storage_mode": "local",
             },
         )
         await self.rune.sessions.save_checkpoint(cp)
@@ -1892,7 +1596,7 @@ class DigitalTwin:
                 "EventLog.delete_session failed for %s: %s", session_id, e,
             )
 
-        # Best-effort backend object cleanup. ChainBackend exposes
+        # Best-effort backend object cleanup.
         # ``delete_session_objects`` when chain mode is active; in
         # local mode there's nothing to clean up.
         gf_result: dict = {"attempted": False}
@@ -1925,109 +1629,14 @@ class DigitalTwin:
             "deleted_event_count": deleted,
             "audit_event_recorded": True,
             "storage": gf_result,
-            "bsc_anchors_immutable_note": (
-                "Existing BSC state-root anchors are immutable on chain "
+            "storage_immutable_note": (
+                "Storage records that reference deleted sessions are immutable."
                 "and cannot be deleted. The deletion event is itself "
                 "part of the audit trail."
             ),
         }
 
     # ── Task Delegation ──────────────────────────────────────────
-
-    async def create_task(
-        self, description: str, task_type: str = "general", assignee: str = "",
-    ) -> str:
-        task_id = f"task_{uuid.uuid4().hex[:8]}"
-        await self.rune.tasks.create_task(
-            task_id=task_id,
-            agent_id=self.config.agent_id,
-            metadata={
-                "description": description,
-                "task_type": task_type,
-                "assignee": assignee or self.config.agent_id,
-                "status": "created",
-            },
-        )
-        return task_id
-
-    async def complete_task(
-        self, task_id: str, outcome: str = "success",
-        strategy: str = "", feedback: str = "",
-    ) -> dict:
-        task = await self.rune.tasks.get_task(task_id)
-        if not task:
-            return {"error": f"Task {task_id} not found"}
-
-        meta = task.get("metadata", {})
-        await self.rune.tasks.update_task(
-            task_id=task_id,
-            state={"outcome": outcome, "feedback": feedback},
-            status="completed",
-        )
-        learning = await self.evolution.skills.record_task_outcome(
-            task_type=meta.get("task_type", "general"),
-            description=meta.get("description", ""),
-            strategy=strategy,
-            outcome=outcome,
-            feedback=feedback,
-        )
-        if learning:
-            storage = "chain" if self.config.use_chain else "local"
-            self._emit("skill_learned", {
-                "skill": learning.get("skill_name", "unknown"),
-                "lesson": learning.get("lesson", ""),
-                "storage": storage,
-            })
-        return learning or {}
-
-    # ── Social Protocol ──────────────────────────────────────────
-
-    async def gossip(
-        self,
-        target_agent_id: str,
-        topic: str = "",
-        transport: str = "sync",
-    ) -> dict:
-        """
-        Start and conduct a gossip session with another agent.
-
-        Returns the session summary and impression formed.
-        """
-        social = self.evolution.social
-        session = await social.start_gossip(target_agent_id, topic, transport)
-
-        self._emit("gossip_started", {
-            "target": target_agent_id,
-            "topic": topic,
-            "transport": transport,
-            "session_id": session.session_id,
-        })
-
-        return {
-            "session_id": session.session_id,
-            "status": session.status,
-            "target": target_agent_id,
-            "topic": topic,
-        }
-
-    async def discover(
-        self,
-        interest: Optional[str] = None,
-        capability: Optional[str] = None,
-    ) -> list:
-        """Find agents matching interests or capabilities."""
-        interests = [interest] if interest else None
-        capabilities = [capability] if capability else None
-        return await self.evolution.social.discover_agents(
-            interests=interests,
-            capabilities=capabilities,
-        )
-
-    async def social_map(self) -> dict:
-        """Get social graph summary."""
-        return await self.evolution.social.get_social_map()
-
-    # ── Lifecycle ────────────────────────────────────────────────
 
     async def close(self):
         # ── 1. Commit pending facts to chain + save session ──

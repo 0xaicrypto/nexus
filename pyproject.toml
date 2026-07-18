@@ -1,7 +1,7 @@
 [project]
 name = "nexus-workspace"
 version = "0.1.0"
-description = "Self-evolving AI agents with on-chain identity — monorepo"
+description = "Self-evolving AI agents — monorepo"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"

@@ -1,19 +1,15 @@
 """
 nexus_core — top-level entry points + Builder.
 
-The 80% case is the four module-level factory functions:
+The 80% case is two module-level factory functions:
 
     import nexus_core
 
     rt = nexus_core.local()                          # Zero config, file-backed
-    rt = nexus_core.testnet(private_key="0x...")     # BSC testnet anchoring
-    rt = nexus_core.mainnet(private_key="0x...")     # BSC mainnet anchoring
     rt = nexus_core.builder().mock_backend().build() # Unit tests / custom config
 
-Each returns an :class:`AgentRuntime` — the 5-provider facade
-(``sessions``, ``memory``, ``artifacts``, ``tasks``, ``impressions``)
-backed by a single :class:`StorageBackend`. The ``backend`` is
-exposed on the runtime for low-level callers.
+Each returns an :class:`AgentRuntime` backed by a single
+:class:`StorageBackend`.
 
 For complex configuration, :func:`builder` returns a fluent
 :class:`Builder`:
@@ -25,12 +21,6 @@ For complex configuration, :func:`builder` returns a fluent
         .runtime_id("prod-runtime-1")
         .build()
     )
-
-Phase H note — the previous public surface used a static-factory
-class ``Rune`` (``Rune.local()`` / ``Rune.testnet()`` /
-``Rune.builder()``). That class is gone; call the module-level
-functions directly. ``RuneBuilder`` was renamed to :class:`Builder`,
-and the returned facade ``RuneProvider`` to :class:`AgentRuntime`.
 """
 
 from __future__ import annotations
@@ -41,7 +31,6 @@ from .core.backend import StorageBackend
 from .core.flush import FlushPolicy
 from .core.providers import AgentRuntime
 from .providers.artifact import ArtifactProviderImpl
-from .providers.impression import ImpressionProviderImpl
 from .providers.session import SessionProviderImpl
 from .providers.task import TaskProviderImpl
 
@@ -49,9 +38,7 @@ from .providers.task import TaskProviderImpl
 
 
 def local(base_dir: str = ".nexus_state") -> AgentRuntime:
-    """Create a local-mode runtime. Zero config, no blockchain.
-
-    Perfect for development, testing, and demos. All data stored
+    """Create a local-mode runtime. Zero config. All data stored
     as files under ``base_dir``.
 
     Args:
@@ -61,38 +48,6 @@ def local(base_dir: str = ".nexus_state") -> AgentRuntime:
         An :class:`AgentRuntime` backed by :class:`LocalBackend`.
     """
     return builder().local_backend(base_dir).build()
-
-
-def testnet(private_key: str, **kwargs) -> AgentRuntime:
-    """Create a testnet-mode runtime — anchored on BSC testnet.
-
-    Requires:
-      - BNB testnet tokens (from a faucet).
-      - Deployed contracts (AgentStateExtension + TaskStateManager).
-
-    Args:
-        private_key: BSC wallet private key (0x-prefixed hex).
-        **kwargs: Additional :class:`ChainBackend` options
-            (``rpc_url``, ``agent_state_address``,
-            ``task_manager_address``, ``identity_registry_address``).
-
-    Returns:
-        An :class:`AgentRuntime` backed by :class:`ChainBackend`.
-    """
-    return builder().chain_backend(private_key, network="testnet", **kwargs).build()
-
-
-def mainnet(private_key: str, **kwargs) -> AgentRuntime:
-    """Create a mainnet-mode runtime — anchored on BSC mainnet.
-
-    Args:
-        private_key: BSC wallet private key.
-        **kwargs: Additional :class:`ChainBackend` options.
-
-    Returns:
-        An :class:`AgentRuntime` backed by :class:`ChainBackend`.
-    """
-    return builder().chain_backend(private_key, network="mainnet", **kwargs).build()
 
 
 def builder() -> "Builder":
@@ -110,8 +65,8 @@ def builder() -> "Builder":
 class Builder:
     """Fluent builder for :class:`AgentRuntime`.
 
-    Use this when the simple factory functions (:func:`local`,
-    :func:`testnet`, :func:`mainnet`) don't fit — e.g. custom
+    Use this when the simple factory functions (:func:`local`)
+    don't fit — e.g. custom
     flush policy, an injected backend, or a specific runtime id
     for multi-runtime scenarios.
 
@@ -120,9 +75,8 @@ class Builder:
         import nexus_core
         rt = (
             nexus_core.builder()
-            .backend(my_custom_backend)
+            .local_backend(".nexus_state")
             .flush_policy(FlushPolicy.aggressive())
-            .runtime_id("prod-runtime-1")
             .build()
         )
     """
@@ -141,12 +95,6 @@ class Builder:
         """Use :class:`LocalBackend` (file-based, zero config)."""
         from .backends.local import LocalBackend
         self._backend = LocalBackend(base_dir=base_dir)
-        return self
-
-    def chain_backend(self, private_key: str, network: str = "testnet", **kwargs) -> "Builder":
-        """Use :class:`ChainBackend` (local store + BSC anchoring)."""
-        from .backends.chain import ChainBackend
-        self._backend = ChainBackend(private_key=private_key, network=network, **kwargs)
         return self
 
     def mock_backend(self) -> "Builder":
@@ -181,6 +129,5 @@ class Builder:
             ),
             artifacts=ArtifactProviderImpl(self._backend),
             tasks=TaskProviderImpl(self._backend),
-            impressions=ImpressionProviderImpl(self._backend),
             backend=self._backend,
         )

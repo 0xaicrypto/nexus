@@ -98,7 +98,7 @@ _QUERY_EXPANSIONS: dict[str, list[str]] = {
     "chart":    ["chart", "plot", "matplotlib", "graph"],
     "plot":     ["plot", "chart", "matplotlib"],
     "translate": ["translate", "translation", "i18n"],
-    "wallet":   ["wallet", "ethers", "web3", "blockchain"],
+    "wallet":   ["wallet", "ethers", "web3"],
     "github":   ["github", "git"],
     "search":   ["web search", "search api", "tavily"],
 }

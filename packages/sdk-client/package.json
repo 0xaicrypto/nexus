@@ -1,0 +1,17 @@
+{
+  "name": "@heurion/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Heurion SDK — typed client for the Heurion clinical AI backend",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

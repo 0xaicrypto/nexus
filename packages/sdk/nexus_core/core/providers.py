@@ -6,18 +6,16 @@ They depend on StorageBackend for HOW data is stored.
 
     SessionProvider     — checkpoint / resume / crash recovery
     ArtifactProvider    — versioned output storage
-    TaskProvider        — task lifecycle tracking (A2A)
-    ImpressionProvider  — peer-to-peer attestation
+    TaskProvider        — task lifecycle tracking
     AgentRuntime        — Facade bundling the providers
 
 Framework adapters (ADK, LangGraph, CrewAI) consume these interfaces.
 They never see StorageBackend directly.
 
-Phase D 续 #2: ``MemoryProvider`` was removed. Long-term knowledge
-persistence is now handled by the typed Phase J namespace stores
+Memory persistence is handled by the typed namespace stores
 (``FactsStore`` / ``EpisodesStore`` / ``SkillsStore`` /
 ``PersonaStore`` / ``KnowledgeStore``) which live in
-``nexus_core.memory`` and chain-mirror via ``VersionedStore``.
+``nexus_core.memory``.
 
 Design:
     - Provider ABCs = Template Method (define the contract)
@@ -29,13 +27,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from .models import (
-    Artifact,
-    Checkpoint,
-    Impression,
-    ImpressionSummary,
-    NetworkStats,
-)
+from .models import Artifact, Checkpoint
 
 # ═══════════════════════════════════════════════════════════════════════
 # Session Provider
@@ -224,100 +216,6 @@ class TaskProvider(ABC):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Impression Provider (Social Protocol)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class ImpressionProvider(ABC):
-    """
-    Framework-agnostic impression persistence (Social Protocol).
-
-    The 5th Rune provider — manages agent-to-agent impressions
-    formed through gossip sessions. Designed with relational query
-    semantics (by target, by source, mutual, ranked) rather than
-    content-similarity search.
-
-    Impressions are:
-      - Asymmetric: A's impression of B ≠ B's impression of A
-      - Cumulative: multiple sessions → multiple impressions
-      - Multi-dimensional: 5 scored dimensions + overall compatibility
-    """
-
-    @abstractmethod
-    async def record(self, impression: Impression) -> str:
-        """Store a new impression after a gossip session. Returns impression_id."""
-        ...
-
-    @abstractmethod
-    async def get_impressions_of(
-        self,
-        target_agent: str,
-        agent_id: str,
-        limit: int = 10,
-    ) -> list[Impression]:
-        """
-        All impressions this agent (agent_id) has formed about target_agent.
-        Ordered by recency.
-        """
-        ...
-
-    @abstractmethod
-    async def get_impressions_from(
-        self,
-        agent_id: str,
-        limit: int = 20,
-    ) -> list[Impression]:
-        """
-        All impressions others have formed about this agent.
-        The 'inbound' view — how the network sees you.
-        """
-        ...
-
-    @abstractmethod
-    async def get_compatibility(
-        self,
-        agent_a: str,
-        agent_b: str,
-    ) -> Optional[float]:
-        """
-        Latest compatibility score between two agents (A's view of B).
-        Returns None if they've never interacted.
-        """
-        ...
-
-    @abstractmethod
-    async def get_top_matches(
-        self,
-        agent_id: str,
-        top_k: int = 10,
-        min_score: float = 0.0,
-        dimension: Optional[str] = None,
-    ) -> list[ImpressionSummary]:
-        """
-        Agents ranked by compatibility with this agent.
-        Optionally filter by a specific dimension.
-        """
-        ...
-
-    @abstractmethod
-    async def get_mutual(
-        self,
-        agent_id: str,
-        min_score: float = 0.5,
-    ) -> list[tuple]:
-        """
-        Agents with mutual positive impressions.
-        Returns list of (other_agent_id, my_score_of_them, their_score_of_me).
-        """
-        ...
-
-    @abstractmethod
-    async def get_network_stats(self, agent_id: str) -> NetworkStats:
-        """Aggregated social statistics for an agent."""
-        ...
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # Facade: AgentRuntime
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -327,20 +225,12 @@ class AgentRuntime:
     Facade: the single object users interact with.
 
     Bundles the framework providers behind a clean interface.
-    No internal implementation details are exposed.
-
-    Phase D 续 #2: ``memory`` was removed. Memory storage is now
-    handled by the typed Phase J namespace stores (FactsStore /
-    EpisodesStore / SkillsStore / PersonaStore / KnowledgeStore)
-    which are constructed inside ``DigitalTwin`` and chained
-    through to chain mirroring via ``VersionedStore``.
 
     Usage:
         rune = nexus_core.local()
 
         await rune.sessions.save_checkpoint(checkpoint)
         version = await rune.artifacts.save("report.json", data, agent_id="my-agent")
-        await rune.impressions.record(impression)
     """
 
     def __init__(
@@ -348,21 +238,15 @@ class AgentRuntime:
         sessions: SessionProvider,
         artifacts: ArtifactProvider,
         tasks: TaskProvider,
-        impressions: Optional[ImpressionProvider] = None,
         backend: Optional[Any] = None,
     ):
         self.sessions: SessionProvider = sessions
         self.artifacts: ArtifactProvider = artifacts
         self.tasks: TaskProvider = tasks
-        self.impressions: Optional[ImpressionProvider] = impressions
-        self._backend = backend  # held for lifecycle (close/flush)
+        self._backend = backend
 
     async def close(self) -> None:
-        """Drain pending writes and release resources.
-
-        Calls backend.close() which, for ChainBackend, waits for
-        pending background anchor tasks to finish before shutting down.
-        """
+        """Drain pending writes and release resources."""
         if self._backend is not None and hasattr(self._backend, "close"):
             await self._backend.close()
 

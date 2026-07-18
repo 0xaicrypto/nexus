@@ -9,7 +9,7 @@ Or with explicit args:
     python -m nexus --provider gemini --api-key AIza...
 
 Chain mode (BSC):
-    python -m nexus --private-key 0x...
+    python -m nexus # --private-key 0x...
 """
 
 from __future__ import annotations
@@ -281,9 +281,7 @@ async def main_loop(args):
         sys.exit(1)
 
     # ── Chain mode config ──
-    private_key = args.private_key or _env("NEXUS_PRIVATE_KEY", "")
-    network = args.network or _env("NEXUS_NETWORK", "testnet")
-    chain_mode = bool(private_key)
+    private_key =     network =     chain_mode = bool(private_key)
 
     # Chain addresses (env vars auto-resolved by SDK, but we can pass explicitly)
     net_prefix = "MAINNET" if "mainnet" in network else "TESTNET"
@@ -403,11 +401,11 @@ def cli_main():
 
     # Chain mode options
     parser.add_argument(
-        "--private-key", default="",
+        "# --private-key", default="",
         help="BSC wallet private key — enables chain mode (env: NEXUS_PRIVATE_KEY)",
     )
     parser.add_argument(
-        "--network", default="", choices=["testnet", "mainnet", ""],
+        "# --network", default="", choices=["testnet", "mainnet", ""],
         help="BSC network (env: NEXUS_NETWORK, default: testnet)",
     )
 

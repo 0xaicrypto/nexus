@@ -8,7 +8,6 @@ from .memory_evolver import MemoryEvolver
 from .persona_evolver import PersonaEvolver
 from .skill_evaluator import SkillEvaluator
 from .skill_evolver import SkillEvolver
-from .social_engine import SocialEngine
 from .verdict_runner import VerdictRunner
 
 __all__ = [
@@ -18,6 +17,5 @@ __all__ = [
     "SkillEvaluator",
     "PersonaEvolver",
     "KnowledgeCompiler",
-    "SocialEngine",
     "VerdictRunner",
 ]

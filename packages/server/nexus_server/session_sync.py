@@ -33,7 +33,7 @@ twin's EventLog with this metadata schema::
 Any ``None`` field means "not changed by this event". Replay applies
 events oldest-first; last-write-wins per ``session_id``.
 
-EventLog already does a backend snapshot + BSC state-root anchor on
+EventLog already does a backend snapshot + local storage on
 compaction, so these metadata events ride the same durability path as
 chat messages — no new sync infrastructure.
 

@@ -25,7 +25,6 @@ import pytest
 # Ensure the SDK package is importable regardless of install state
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nexus_core.state import StateManager
 from nexus_core.flush import FlushPolicy
 
 
