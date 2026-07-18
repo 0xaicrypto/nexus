@@ -12,19 +12,23 @@ export async function filesRouter(app: FastifyInstance) {
     const data = await request.file()
     if (!data) return reply.status(400).send({ error: 'No file uploaded' })
 
-    const uploadDir = path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', request.user!.userId, 'uploads')
-    fs.mkdirSync(uploadDir, { recursive: true })
+    const dir = path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', request.user!.userId, 'uploads')
+    fs.mkdirSync(dir, { recursive: true })
     const filename = `${Date.now()}_${data.filename}`
-    const filepath = path.join(uploadDir, filename)
+    const filepath = path.join(dir, filename)
 
     const buffer = await data.toBuffer()
     fs.writeFileSync(filepath, buffer)
+
+    // Read patient_hash from form data
+    const patientHash = (data.fields?.patient_hash as any)?.value || ''
 
     return {
       file_id: filename,
       name: data.filename,
       mime: data.mimetype,
       size_bytes: buffer.length,
+      patient_hash: patientHash || null,
     }
   })
 
