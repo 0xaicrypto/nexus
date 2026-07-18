@@ -1,152 +1,481 @@
-PROTOCOL TITLE: A Phase II, Open-Label Study of Pembrolizumab Combined with
-Chemotherapy in Treatment-Naïve Patients with Advanced Non-Small Cell Lung Cancer
+PROTOCOL TITLE: A Randomized, Open-Label Phase II Study of Toripalimab Combined
+with Anlotinib Versus Docetaxel in Advanced Non-Small Cell Lung Cancer
+After Failure of Platinum-Based Chemotherapy
 
-STUDY ID: NSCLC-2024-PEM-002
-VERSION: 2.0
+STUDY ID: NSCLC-2024-TA-001
+PROTOCOL VERSION: 3.0
 DATE: 2026-07-18
+PRINCIPAL INVESTIGATOR: Dr. Zhang Wei
+SPONSOR: Heurion Clinical Research Network
+SITES: Multi-center (5 sites)
 
-──────────────────────────────────────────────────────────
+══════════════════════════════════════════════════════════
+1. BACKGROUND AND RATIONALE
 
-1. OBJECTIVES
+Non-small cell lung cancer (NSCLC) accounts for approximately 85% of all
+lung cancers. Despite advances in first-line immunotherapy, patients who
+progress after platinum-based chemotherapy have limited treatment options
+with median overall survival of 8-12 months.
 
-Primary Objective:
-- To evaluate the objective response rate (ORR) of pembrolizumab combined
-  with platinum-based chemotherapy in treatment-naïve patients with
-  advanced NSCLC.
+Toripalimab (JS001) is a humanized anti-PD-1 monoclonal antibody approved
+in China for melanoma and nasopharyngeal carcinoma. Anlotinib is a novel
+multi-target tyrosine kinase inhibitor (TKI) targeting VEGFR, FGFR, PDGFR,
+and c-Kit. The combination of anti-PD-1 therapy with anti-angiogenic agents
+has shown synergistic anti-tumor activity in multiple tumor types.
 
-Secondary Objectives:
-- To assess progression-free survival (PFS) at 12 months
-- To evaluate overall survival (OS) at 24 months
-- To characterize the safety and tolerability profile
-- To explore biomarker correlates (PD-L1 TPS, TMB) with clinical outcomes
+Preclinical data suggest that anlotinib-mediated vascular normalization may
+enhance T-cell infiltration, potentially augmenting the efficacy of PD-1
+blockade. A Phase Ib study (N=28) demonstrated an ORR of 39.3% and
+manageable safety profile for the toripalimab-anlotinib combination in
+pre-treated NSCLC patients.
 
-──────────────────────────────────────────────────────────
+══════════════════════════════════════════════════════════
+2. STUDY OBJECTIVES
 
-2. INCLUSION CRITERIA
+2.1 Primary Objective
+- To compare progression-free survival (PFS) between Arm A (toripalimab +
+  anlotinib) and Arm B (docetaxel) in patients with advanced NSCLC who
+  have progressed after platinum-based chemotherapy.
 
-Patients must meet ALL of the following:
+2.2 Secondary Objectives
+- To compare overall survival (OS) at 24 months
+- To compare objective response rate (ORR) per RECIST v1.1
+- To compare disease control rate (DCR) at 12 weeks
+- To evaluate safety and tolerability (CTCAE v5.0)
+- To assess quality of life using EORTC QLQ-C30 and QLQ-LC13
+- To explore biomarker correlates (PD-L1 TPS, TMB, blood-based TMB)
 
-  1. Histologically or cytologically confirmed stage IIIB/IV NSCLC
-  2. Age ≥ 18 years
-  3. ECOG performance status 0-1
-  4. Measurable disease per RECIST v1.1
-  5. No prior systemic therapy for advanced NSCLC
-  6. Adequate organ function:
-     - ANC ≥ 1,500/μL
-     - Platelets ≥ 100,000/μL
-     - Hemoglobin ≥ 9.0 g/dL
-     - Creatinine clearance ≥ 60 mL/min
-     - Total bilirubin ≤ 1.5 × ULN
-     - AST/ALT ≤ 2.5 × ULN (≤ 5 × ULN if liver metastases)
-  7. PD-L1 TPS ≥ 1% by IHC (22C3 assay)
-  8. Life expectancy ≥ 3 months
-  9. Signed informed consent
+2.3 Exploratory Objectives
+- To evaluate circulating tumor DNA (ctDNA) dynamics as early predictor
+  of response
+- To assess tumor immune microenvironment changes in paired biopsies
+- To correlate anlotinib exposure levels with efficacy and toxicity
 
-──────────────────────────────────────────────────────────
+══════════════════════════════════════════════════════════
+3. STUDY DESIGN
 
-3. EXCLUSION CRITERIA
+This is a randomized, open-label, active-controlled, parallel-group,
+multi-center Phase II study.
 
-  1. EGFR mutation, ALK rearrangement, or ROS1 fusion positive
-  2. Active autoimmune disease requiring systemic treatment
-     within the past 2 years
-  3. History of interstitial lung disease or pneumonitis
-  4. Active CNS metastases (treated, stable CNS metastases allowed)
-  5. Prior treatment with anti-PD-1, anti-PD-L1, or anti-CTLA-4
-  6. Active infection requiring systemic antibiotics
-  7. Pregnancy or breastfeeding
-  8. Known HIV, active Hepatitis B or C
-  9. Major surgery within 28 days of first dose
-  10. Uncontrolled hypertension (> 160/100 mmHg)
+Patients will be randomized in a 1:1 ratio to:
+  Arm A (Experimental): Toripalimab 240 mg IV Q3W + Anlotinib 12 mg PO
+                         daily (2 weeks on/1 week off)
+  Arm B (Control):       Docetaxel 75 mg/m² IV Q3W
 
-──────────────────────────────────────────────────────────
+Stratification factors:
+  - PD-L1 TPS status (< 1% vs 1-49% vs ≥ 50%)
+  - Histology (squamous vs non-squamous)
+  - Number of prior treatment lines (1 vs 2)
 
-4. TREATMENT PLAN
+Treatment continues until disease progression, unacceptable toxicity,
+patient withdrawal, or completion of 24 months of therapy.
 
-Arm A (Experimental): Pembrolizumab + Chemotherapy
-  - Pembrolizumab 200 mg IV every 3 weeks (Q3W)
-  - Carboplatin AUC 5 IV Q3W for 4 cycles
-  - Pemetrexed 500 mg/m² IV Q3W for 4 cycles
-  - Maintenance: Pembrolizumab 200 mg IV Q3W + Pemetrexed 500 mg/m² IV Q3W
+Crossover is NOT permitted.
 
-Treatment continues until:
-  - Disease progression (per RECIST v1.1)
-  - Unacceptable toxicity
-  - Patient withdrawal of consent
-  - Maximum 35 cycles of pembrolizumab (approximately 2 years)
+══════════════════════════════════════════════════════════
+4. INCLUSION CRITERIA (Must meet ALL)
 
-──────────────────────────────────────────────────────────
+IC-01: Histologically or cytologically confirmed stage IIIB, IIIC, or
+       IV NSCLC (AJCC 8th edition)
+IC-02: Age ≥ 18 years and ≤ 75 years
+IC-03: ECOG performance status 0 or 1
+IC-04: At least one measurable lesion per RECIST v1.1 (target lesion
+       ≥ 10 mm in longest diameter on CT scan, or ≥ 15 mm for lymph
+       node short axis)
+IC-05: Disease progression during or after platinum-based doublet
+       chemotherapy (1-2 prior lines allowed)
+       - Adjuvant/neoadjuvant chemotherapy completed < 12 months before
+         recurrence counts as one line
+IC-06: Adequate washout period:
+       - Chemotherapy ≥ 21 days
+       - Radiotherapy ≥ 14 days
+       - Major surgery ≥ 28 days
+IC-07: Adequate hematologic function:
+       - Absolute neutrophil count (ANC) ≥ 1,500 cells/μL
+       - Platelet count ≥ 100,000/μL
+       - Hemoglobin ≥ 9.0 g/dL (transfusion allowed ≥ 14 days prior)
+IC-08: Adequate hepatic function:
+       - Total bilirubin ≤ 1.5 × ULN (≤ 3.0 × ULN if Gilbert's syndrome)
+       - AST and ALT ≤ 2.5 × ULN (≤ 5.0 × ULN if liver metastases)
+       - Alkaline phosphatase ≤ 2.5 × ULN (≤ 5.0 × ULN if bone/liver mets)
+IC-09: Adequate renal function:
+       - Serum creatinine ≤ 1.5 × ULN, OR
+       - Calculated creatinine clearance ≥ 50 mL/min (Cockcroft-Gault)
+IC-10: Coagulation: INR and aPTT ≤ 1.5 × ULN (unless on therapeutic
+       anticoagulation)
+IC-11: Thyroid function: TSH within normal range (supplementation allowed)
+IC-12: Left ventricular ejection fraction (LVEF) ≥ 50% by echocardiogram
+       or MUGA scan
+IC-13: Negative pregnancy test for women of childbearing potential (WOCBP)
+       within 7 days of randomization
+IC-14: WOCBP and male patients with WOCBP partners must agree to use highly
+       effective contraception during the study and for 120 days after the
+       last dose
+IC-15: Life expectancy ≥ 3 months as estimated by the investigator
+IC-16: Ability to swallow oral medications (anlotinib is oral)
+IC-17: Signed written informed consent prior to any study-specific procedures
+IC-18: Willingness to undergo mandatory tumor biopsy at baseline and at
+       disease progression (optional at response)
 
-5. SAFETY MONITORING
+══════════════════════════════════════════════════════════
+5. EXCLUSION CRITERIA (Must NOT meet ANY)
 
-Adverse Event Assessment:
-  - CTCAE v5.0 grading for all AEs
-  - Weekly during Cycle 1, then every 3 weeks
-  - DLT evaluation window: first 21 days (Cycle 1)
+EC-01: Known EGFR sensitizing mutation (exon 19 deletion, L858R, G719X,
+       L861Q, S768I), ALK rearrangement, ROS1 fusion, BRAF V600E
+       mutation, MET exon 14 skipping, RET fusion, or NTRK fusion
+       - Note: KRAS mutation, HER2 mutation, and PIK3CA mutation are
+         allowed as no approved targeted therapy exists for these
+         alterations in the second-line setting
+EC-02: Mixed small cell and non-small cell histology
+EC-03: Active central nervous system (CNS) metastases
+       - Exception: Previously treated, asymptomatic CNS metastases
+         that are stable for ≥ 4 weeks after completion of treatment
+         (including steroids) are permitted
+EC-04: Leptomeningeal carcinomatosis
+EC-05: Active autoimmune disease requiring systemic immunosuppressive
+       therapy within 2 years prior to randomization
+       - Exceptions: vitiligo, alopecia, hypothyroidism on stable
+         replacement therapy, type 1 diabetes on insulin, psoriasis
+         not requiring systemic therapy
+EC-06: History of interstitial lung disease (ILD), drug-induced ILD,
+       radiation pneumonitis requiring steroids, or active pneumonitis
+EC-07: Prior treatment with any anti-PD-1, anti-PD-L1, anti-PD-L2,
+       anti-CTLA-4, anti-TIGIT, or anti-LAG3 antibody
+       - Note: Prior anti-angiogenic TKI (except anlotinib) is permitted
+EC-08: Uncontrolled hypertension despite optimal medical management
+       (systolic > 150 mmHg or diastolic > 100 mmHg on 2 consecutive
+       readings)
+EC-09: Clinically significant bleeding within 3 months prior to
+       randomization (hemoptysis > 2.5 mL, GI bleeding, tumor bleeding)
+EC-10: Major blood vessel invasion by tumor (aorta, vena cava, pulmonary
+       artery) as determined by CT imaging
+EC-11: History of arterial or venous thromboembolism within 6 months
+       (including TIA, CVA, DVT, PE)
+EC-12: Proteinuria ≥ 2+ on dipstick or ≥ 1.0g/24-hour urine collection
+EC-13: Active infection requiring systemic antibiotic, antiviral, or
+       antifungal therapy within 14 days of randomization
+EC-14: Known HIV infection
+EC-15: Active Hepatitis B (HBsAg positive + HBV DNA > 2000 IU/mL) or
+       Hepatitis C (anti-HCV positive + HCV RNA detectable)
+EC-16: Concurrent malignancy requiring active treatment within 3 years
+       (except adequately treated basal cell skin cancer, superficial
+       bladder cancer, and carcinoma in situ of cervix)
+EC-17: Pregnant or breastfeeding
+EC-18: Any condition that, in the investigator's opinion, would interfere
+       with study participation or interpretation of results
+EC-19: Known hypersensitivity to toripalimab, anlotinib, docetaxel, or
+       any of their excipients
+EC-20: Receipt of live attenuated vaccine within 30 days of randomization
 
-Dose-Limiting Toxicity (DLT) Definition:
-  - Grade 4 neutropenia lasting > 7 days
-  - Febrile neutropenia (ANC < 1,000/μL + fever > 38.5°C)
-  - Grade 4 thrombocytopenia or Grade 3 with bleeding
-  - Grade ≥ 3 non-hematologic toxicity (except nausea, vomiting,
-    diarrhea controlled with supportive care)
-  - Grade ≥ 2 pneumonitis
-  - Any treatment-related death
+══════════════════════════════════════════════════════════
+6. TREATMENT REGIMEN
 
-Stopping Rules:
-  - DLT rate exceeds 33% in first 12 patients
-  - Any Grade 5 (fatal) adverse event
-  - ≥ 3 Grade 4 treatment-related AEs
+6.1 Arm A — Experimental (N=60)
 
-──────────────────────────────────────────────────────────
+Toripalimab:
+  - Dose: 240 mg
+  - Route: Intravenous (IV) infusion over 60 minutes (first dose: 90 min)
+  - Frequency: Every 3 weeks (Q3W) on Day 1 of each 21-day cycle
+  - Pre-medication: Not routinely required. Acetaminophen 650 mg PO and
+    diphenhydramine 25 mg IV/PO for Grade ≥ 2 infusion reactions
 
-6. ASSESSMENT SCHEDULE
+Anlotinib:
+  - Dose: 12 mg
+  - Route: Oral (PO), once daily
+  - Schedule: 2 weeks on / 1 week off (Days 1-14 of each 21-day cycle)
+  - Administration: With a glass of water, at approximately the same
+    time each day, with or without food
+  - Missed dose: If < 12 hours, take immediately. If ≥ 12 hours, skip
+    and resume next scheduled dose
 
-Screening (Day -28 to -1):
-  - Informed consent, medical history, physical exam, vital signs
-  - ECOG PS, CBC, chemistry panel, coagulation
-  - Tumor assessment (CT/MRI per RECIST v1.1)
-  - PD-L1 IHC testing (archival or fresh biopsy)
-  - Pregnancy test (if applicable)
+Dose Modifications:
 
-Treatment Visits (Every 3 weeks):
-  - Physical exam, vital signs, ECOG PS
-  - CBC, chemistry panel
-  - AE assessment (CTCAE v5.0)
+Toripalimab dose reductions are NOT permitted. Management of immune-
+related adverse events (irAEs) follows published guidelines (ASCO/NCCN).
+
+Anlotinib dose reduction levels:
+  - Level -1: 10 mg daily
+  - Level -2: 8 mg daily
+  - Discontinue if toxicity persists at 8 mg
+
+Anlotinib should be withheld for:
+  - Grade 3 hypertension not controlled within 48 hours
+  - Grade ≥ 2 bleeding
+  - Grade ≥ 3 proteinuria
+  - Any arterial thromboembolic event
+  - Wound dehiscence requiring medical intervention
+
+6.2 Arm B — Control (N=60)
+
+Docetaxel:
+  - Dose: 75 mg/m²
+  - Route: IV infusion over 60 minutes
+  - Frequency: Every 3 weeks (Q3W) on Day 1
+  - Pre-medication: Dexamethasone 8 mg PO BID for 3 days starting
+    1 day before docetaxel administration
+
+Dose Modifications:
+  - Dose reduction 1: 60 mg/m²
+  - Dose reduction 2: 50 mg/m²
+  - Discontinue if toxicity persists at 50 mg/m²
+  - G-CSF support allowed per ASCO guidelines
+
+══════════════════════════════════════════════════════════
+7. SAFETY MONITORING AND DLT DEFINITIONS
+
+7.1 Adverse Event Assessment
+- All AEs graded per CTCAE v5.0
+- Serious adverse events (SAEs) reported within 24 hours
+- AE attribution assessed by investigator (Unrelated / Unlikely /
+  Possibly / Probably / Definitely related)
+
+7.2 Dose-Limiting Toxicity (DLT) Evaluation Period
+DLT observation window: Cycle 1 (first 21 days of treatment)
+
+7.3 DLT Definitions
+
+Hematologic DLTs:
+  D-01: Grade 4 neutropenia lasting > 7 days despite G-CSF support
+  D-02: Febrile neutropenia (ANC < 500/μL + temperature > 38.5°C)
+  D-03: Grade 4 thrombocytopenia (< 25,000/μL)
+  D-04: Grade 3 thrombocytopenia with clinically significant bleeding
+        requiring platelet transfusion
+  D-05: Grade 4 anemia (Hb < 6.5 g/dL)
+
+Non-Hematologic DLTs:
+  D-06: Grade ≥ 3 non-hematologic toxicity lasting > 48 hours despite
+        optimal supportive care, EXCEPT:
+        - Grade 3 nausea, vomiting, or diarrhea resolving to ≤ Grade 1
+          within 72 hours with supportive care
+        - Grade 3 fatigue resolving to ≤ Grade 1 within 7 days
+        - Grade 3 electrolyte abnormalities corrected within 24 hours
+        - Grade 3 infusion-related reaction resolving to ≤ Grade 1
+          within 6 hours
+        - Grade 3 hypertension controlled within 48 hours
+  D-07: Any Grade 4 non-hematologic toxicity (except as above)
+  D-08: Grade ≥ 2 pneumonitis (requires permanent discontinuation of
+        toripalimab)
+  D-09: Grade ≥ 3 colitis or hepatitis
+  D-10: Grade ≥ 2 myocarditis, pericarditis, or myositis
+  D-11: Any toxicity requiring permanent discontinuation of either
+        study drug
+  D-12: Treatment-related death
+
+7.4 Blinded Independent Central Review (BICR)
+All radiologic assessments (CT/MRI) will be reviewed by independent
+central radiologists blinded to treatment assignment and clinical data.
+
+7.5 Safety Monitoring Committee (SMC)
+An independent SMC composed of 3 oncologists and 1 statistician will
+review safety data at planned interim analyses.
+
+7.6 Study Stopping Rules
+The study will be temporarily suspended for SMC review if:
+
+  S1: DLT rate in Arm A exceeds 30% among the first 20 evaluable
+      patients (≥ 7 DLTs)
+  S2: Any Grade 5 (fatal) adverse event assessed as "possibly",
+      "probably", or "definitely" related to study treatment
+  S3: ≥ 3 patients experience the same Grade 4 treatment-related AE
+      of the same preferred term
+  S4: ≥ 2 patients experience Grade ≥ 3 pneumonitis
+  S5: ≥ 2 treatment-related deaths occur
+
+The study may be terminated early by the sponsor or SMC if:
+  - The safety profile is deemed unacceptable for the target population
+  - The risk-benefit ratio becomes unfavorable based on emerging data
+
+══════════════════════════════════════════════════════════
+8. STUDY ASSESSMENTS AND SCHEDULE
+
+8.1 Screening Period (Day -28 to Day -1)
+
+Assessments:
+  - Written informed consent
+  - Complete medical and oncology history
+  - Physical examination including height, weight, BSA
+  - Vital signs (temperature, heart rate, blood pressure, respiratory
+    rate, SpO2)
+  - ECOG performance status
+  - 12-lead ECG (QTcF interval calculation)
+  - Echocardiogram or MUGA scan (LVEF)
+  - CBC with differential and platelet count
+  - Comprehensive chemistry panel (creatinine, BUN, glucose, albumin,
+    calcium, magnesium, phosphate, total protein, LDH, uric acid)
+  - Liver function tests (total/direct bilirubin, AST, ALT, ALP, GGT)
+  - Coagulation panel (PT/INR, aPTT, fibrinogen)
+  - Thyroid function (TSH, free T3, free T4)
+  - Lipid panel (total cholesterol, HDL, LDL, triglycerides)
+  - Urinalysis with microscopic examination
+  - 24-hour urine protein collection (if dipstick ≥ 2+)
+  - Pregnancy test (serum β-hCG) for WOCBP
+  - Hepatitis B/C serology, HIV testing
+  - Tumor biopsy (archival tissue accepted if collected ≤ 6 months
+    prior; otherwise fresh biopsy required)
+  - PD-L1 IHC testing (22C3 PharmDx assay)
+  - Blood sample for biomarker analysis (ctDNA, TMB, multiplex IHC)
+  - Contrast-enhanced CT scan of chest/abdomen/pelvis (CT-CAP)
+  - Brain MRI with gadolinium (or contrast CT if MRI contraindicated)
+  - Bone scan or FDG PET-CT (if clinically indicated)
   - Concomitant medications review
+  - Adverse event assessment (baseline conditions)
+
+8.2 Treatment Period (Cycles 1-35, each 21 days)
+
+Day 1 of Every Cycle:
+  - Physical examination, weight, vital signs
+  - ECOG performance status
+  - CBC with differential
+  - Comprehensive chemistry panel (every cycle)
+  - Liver function tests (every cycle)
+  - Coagulation panel (Cycles 1-3, then every 3 cycles)
+  - Thyroid function (every 2 cycles)
+  - Lipid panel (every 2 cycles)
+  - Urinalysis (every cycle)
+  - Pregnancy test for WOCBP (every cycle)
+  - Concomitant medications review
+  - Adverse event assessment
+
+Weekly During Cycle 1 (Days 8 and 15):
+  - Vital signs, ECOG PS
+  - CBC with differential
+  - Chemistry panel
+  - Adverse event assessment
+
+Weekly During Cycle 2 (Days 8 and 15):
+  - Vital signs, ECOG PS
+  - CBC with differential
+  - Adverse event assessment
+
+Cycles 3+:
+  - Day 1 assessments only (as above)
 
 Tumor Assessments:
-  - Every 9 weeks (± 7 days) for first 12 months
-  - Every 12 weeks thereafter
-  - Confirmation of CR/PR required ≥ 4 weeks after initial response
+  - CT-CAP every 6 weeks (± 7 days) for the first 6 months
+  - CT-CAP every 9 weeks (± 7 days) thereafter
+  - Brain MRI every 12 weeks (or more frequently if brain metastases
+    present at baseline)
+  - Bone scan or PET-CT every 6 months if bone metastases at baseline
 
-End of Treatment (within 30 days of last dose):
-  - Physical exam, vital signs, ECOG PS
-  - CBC, chemistry panel, coagulation
-  - Tumor assessment
-  - AE resolution assessment
+Response Assessment:
+  - RECIST v1.1 criteria for all patients
+  - Confirmation of CR or PR required with repeat imaging ≥ 4 weeks
+    after initial documentation of response
+  - Patients with SD must have SD documented at least 6 weeks after
+    randomization
 
-Follow-up:
-  - Safety follow-up: 30 days after last dose
-  - Survival follow-up: every 3 months for 2 years
+Quality of Life:
+  - EORTC QLQ-C30 and QLQ-LC13 questionnaires at baseline
+  - Every 6 weeks during treatment
+  - At end of treatment visit
 
-──────────────────────────────────────────────────────────
+Biomarker Sampling:
+  - Blood for ctDNA analysis: baseline, Day 1 of Cycles 2, 3, 5, and
+    every 3 cycles thereafter, and at disease progression
+  - Blood for multiplex IHC/biomarker panel: baseline, Cycle 3 Day 1,
+    and at disease progression
+  - Optional on-treatment tumor biopsy: Cycle 3 Day 1 (window: Day 15-21)
 
-7. STATISTICAL CONSIDERATIONS
+8.3 End of Treatment (EOT) Visit (within 30 days of last dose)
 
-Sample Size:
-  - Target enrollment: 60 patients
-  - Simon's two-stage optimal design
-  - Stage 1: 25 patients (≥ 7 responses → proceed to Stage 2)
-  - Stage 2: 35 additional patients
-  - Total: 60 patients
+  - Physical examination, weight, vital signs
+  - ECOG performance status
+  - CBC with differential and chemistry panel
+  - Liver function tests, coagulation
+  - 12-lead ECG, echocardiogram
+  - Thyroid function, lipid panel
+  - Urinalysis
+  - Pregnancy test (WOCBP)
+  - CT-CAP (unless performed within previous 4 weeks)
+  - Brain MRI (if brain metastases at baseline, unless within 4 weeks)
+  - Concomitant medications review
+  - Adverse event assessment (resolution documentation)
+  - Quality of life questionnaires
+  - Blood for biomarker analysis
 
-Primary Endpoint Analysis:
-  - ORR estimated with 95% exact binomial confidence interval
-  - Null hypothesis: ORR ≤ 30% (historical chemotherapy alone)
-  - Alternative hypothesis: ORR ≥ 50%
-  - One-sided α = 0.05, power = 80%
+8.4 Safety Follow-up Visit (30 days ± 7 days after last dose)
 
-Secondary Endpoint Analysis:
-  - PFS and OS estimated using Kaplan-Meier method
-  - Median and 95% CI reported
-  - Exploratory: Cox proportional hazards for biomarker subgroups
+  - Adverse event assessment (focus on AE resolution)
+  - Concomitant medications
+  - Assessment of ongoing irAEs and management plan
+
+8.5 Long-Term Follow-up (every 12 weeks ± 14 days after EOT)
+
+  - Survival status (alive/dead, date and cause of death if applicable)
+  - Subsequent anti-cancer therapy received
+  - Survival follow-up continues for 24 months from randomization
+    or until death, withdrawal of consent, or study closure
+
+══════════════════════════════════════════════════════════
+9. STATISTICAL ANALYSIS PLAN
+
+9.1 Sample Size Determination
+
+  - Primary endpoint: PFS (progression-free survival)
+  - Hypothesis: Superiority of Arm A over Arm B
+  - Median PFS assumption: Arm A 6.5 months vs Arm B 4.0 months
+  - Hazard ratio: 0.615
+  - Accrual period: 18 months
+  - Follow-up period: 12 months after last patient in
+  - One-sided α = 0.025 (adjusted for one interim analysis)
+  - Power = 80%
+  - Total events required: 98 PFS events
+  - Total sample size: 120 patients (60 per arm), accounting for 10%
+    dropout rate
+
+9.2 Interim Analysis
+
+  - One planned interim analysis for futility at 50% of events (49 PFS
+    events)
+  - O'Brien-Fleming spending function for alpha
+  - Interim analysis will be performed by an independent statistician
+  - SMC will review unblinded results and make recommendations
+  - The primary analysis will be conducted when 98 PFS events have been
+    observed
+
+9.3 Primary Endpoint Analysis
+
+  - PFS defined as time from randomization to first documented disease
+    progression per RECIST v1.1 (BICR) or death from any cause
+  - Patients alive and progression-free at analysis cutoff will be
+    censored at last tumor assessment date
+  - Primary analysis: stratified log-rank test with stratification
+    factors (PD-L1 TPS, histology, prior treatment lines)
+  - Hazard ratio and 95% CI estimated using stratified Cox proportional
+    hazards model
+  - Median PFS and 95% CI estimated by Kaplan-Meier method
+  - Sensitivity analysis: PFS by investigator assessment
+
+9.4 Secondary Endpoint Analyses (Hierarchical Testing)
+
+  1. OS: stratified log-rank test (tested if PFS is significant)
+  2. ORR: Cochran-Mantel-Haenszel test stratified by randomization
+     factors; odds ratio and 95% CI reported
+  3. DCR: same method as ORR
+  4. Safety: descriptive statistics, CTCAE v5.0 grade, system organ
+     class, preferred term
+  5. QoL: mixed-effects model for repeated measures (MMRM) for EORTC
+     QLQ-C30 global health status score
+
+9.5 Subgroup Analyses (Exploratory)
+
+  - PD-L1 TPS subgroups: < 1%, 1-49%, ≥ 50%
+  - Histology: squamous vs non-squamous
+  - Prior treatment lines: 1 vs 2
+  - TMB: high (≥ 10 mut/Mb) vs low (< 10 mut/Mb)
+  - bTMB: high vs low (cutoff to be determined from Phase Ib data)
+  - Presence of liver metastases
+  - Age: < 65 vs ≥ 65 years
+  - Sex: male vs female
+  - Smoking status: never vs former/current
+
+9.6 Sample Size Re-estimation
+
+  - Adaptive sample size re-estimation based on pooled event rate at
+    interim analysis (blinded)
+  - Maximum increase of 40 patients (20 per arm)
+  - Conducted by independent statistician; details not disclosed to
+    investigators or sponsor to maintain blinding
+
+══════════════════════════════════════════════════════════
+END OF PROTOCOL

@@ -63,10 +63,28 @@ export async function chatRouter(app: FastifyInstance) {
       })
       send({ type: 'context_info', text: projected.budget.map((b: any) => `${b.layer}: ${b.tokens}t/${b.items}i`).join(' | '), kind: 'projection' })
 
+      // #5: Include research study context
+      const studies = await (prisma as any).researchStudy.findMany({
+        where: { userId },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+      })
+      let studyContext = ''
+      if (studies.length > 0) {
+        studyContext = '\n## Active Research Studies\n'
+        for (const s of studies) {
+          studyContext += `- **${s.shortCode}**: ${s.name}\n`
+          if (s.protocol) {
+            studyContext += `  Protocol snippet: ${s.protocol.slice(0, 500).replace(/\n/g, ' ')}\n`
+          }
+        }
+        studyContext += '\nWhen asked about studies, reference these. When asked about details not in context, suggest importing the full protocol.\n'
+      }
+
       // #5: Conversation history from event log (last 20 turns)
       const history = ctx.eventLog.query({ sessionId: sid, limit: 40 }).reverse()
       const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-        { role: 'system', content: projected.systemPrompt },
+        { role: 'system', content: projected.systemPrompt + studyContext },
       ]
       for (const evt of history) {
         if (evt.eventType === 'user_message') messages.push({ role: 'user', content: evt.content })
