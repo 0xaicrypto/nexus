@@ -34,13 +34,17 @@ export async function documentsRouter(app: FastifyInstance) {
     return { id: doc.id, title: doc.title, body: doc.body, created_at: doc.createdAt, updated_at: doc.updatedAt }
   })
 
-  app.put('/api/v1/docs/:docId', async (request) => {
+  app.put('/api/v1/docs/:docId', async (request, reply) => {
     const { docId } = request.params as any
     const { title, body } = request.body as any
     const data: any = { updatedAt: new Date().toISOString() }
     if (title !== undefined) data.title = title
     if (body !== undefined) data.body = body
-    await (prisma as any).doc.update({ where: { id: docId }, data })
+    try {
+      await (prisma as any).doc.update({ where: { id: docId }, data })
+    } catch {
+      return reply.status(404).send({ error: 'Document not found' })
+    }
     const doc = await (prisma as any).doc.findFirst({ where: { id: docId } })
     return { id: doc!.id, title: doc!.title, body: doc!.body, created_at: doc!.createdAt, updated_at: doc!.updatedAt }
   })
