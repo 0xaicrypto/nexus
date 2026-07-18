@@ -2,6 +2,7 @@ import { EventLog, Event } from '../../core/event-log'
 import { FactsStore, EpisodesStore, SkillsStore } from '../../evolution/stores'
 import { ContractEngine } from '../../core/contracts'
 import { MemoryProjection } from '../../retrieval/memory-projection'
+import { deepseekChat, getApiKey } from '../../common/llm.js'
 
 export class ChatOrchestrator {
   private projection: MemoryProjection
@@ -16,92 +17,74 @@ export class ChatOrchestrator {
     this.projection = new MemoryProjection(eventLog)
   }
 
-  /**
-   * 一次完整对话轮次 — 走完整进化回路
-   *
-   *   1. INGEST   → eventLog.append(user_message)
-   *   6. RETRIEVE → projection.project(...)    ← 加权注意力上下文
-   *   3. CONTRACT → contracts.preCheck()
-   *   4. LLM      → llmCall(systemPrompt, message)
-   *   5. CONTRACT → contracts.postCheck()
-   *   1. INGEST   → eventLog.append(assistant_response)
-   *
-   *   异步后处理:
-   *   2. EXTRACT  → extractTakeaway()
-   *   5. EVOLVE   → maybeEvolve()
-   */
   async turn(params: {
-    userId: string
-    message: string
-    sessionId: string
-    patientHash: string | null
-    persona: string
+    userId: string; message: string; sessionId: string
+    patientHash: string | null; persona: string
     llmCall: (systemPrompt: string, userMessage: string) => Promise<string>
   }): Promise<{ userEvent: Event; response: string; budget: any[] }> {
     const { userId, message, sessionId, patientHash, persona, llmCall } = params
 
-    // ── 1. 记录用户消息 ──
     const userEvent = this.eventLog.append({
-      timestamp: Date.now() / 1000,
-      eventType: 'user_message',
-      content: message,
-      metadata: { patientHash },
-      agentId: userId,
-      sessionId,
+      timestamp: Date.now() / 1000, eventType: 'user_message', content: message,
+      metadata: { patientHash }, agentId: userId, sessionId,
     })
 
-    // ── 6. 加权注意力上下文投影 ──
     const projected = await this.projection.project({
-      userId,
-      patientHash,
-      sessionId,
-      persona,
-      facts: this.factsStore.all(),
-      episodes: this.episodesStore.all(),
-      skills: this.skillsStore.all(),
+      userId, patientHash, sessionId,
+      persona, facts: this.factsStore.all(), episodes: this.episodesStore.all(), skills: this.skillsStore.all(),
     })
 
-    // ── 3. 契约前置检查 ──
     const preCheck = this.contracts.preCheck(message)
-    if (preCheck.violations.length > 0) {
-      console.warn('pre-check violations:', preCheck.violations)
-    }
+    if (preCheck.violations.length > 0) console.warn('pre-check violations:', preCheck.violations)
 
-    // ── 4. LLM 回复 ──
     const response = await llmCall(projected.systemPrompt, message)
 
-    // ── 5. 契约后置检查 ──
     const postCheck = this.contracts.postCheck(message, response)
-
-    // ── 1. 记录助手回复 ──
     this.eventLog.append({
-      timestamp: Date.now() / 1000,
-      eventType: 'assistant_response',
-      content: response,
-      metadata: { contractPassed: postCheck.passed },
-      agentId: userId,
-      sessionId,
+      timestamp: Date.now() / 1000, eventType: 'assistant_response', content: response,
+      metadata: { contractPassed: postCheck.passed }, agentId: userId, sessionId,
     })
 
     return { userEvent, response, budget: projected.budget }
   }
 
-  // ── 异步后处理 (不阻塞回复) ──
+  // #2: Extract facts automatically using DeepSeek
+  async postTurn(userId: string, sessionId: string, userMessage: string) {
+    const recentEvents = this.eventLog.query({ sessionId, limit: 6 }).reverse()
+    const conversation = recentEvents
+      .map(e => `${e.eventType === 'user_message' ? 'USER' : 'AI'}: ${e.content.slice(0, 300)}`)
+      .join('\n')
 
-  async postTurn(userId: string, sessionId: string, message: string) {
-    // 2. EXTRACT: 提取会话摘要
+    // Extract takeaway as episode summary
     const turnCount = this.eventLog.query({ sessionId }).length
-    this.episodesStore.upsert(sessionId,
-      `Conversation about: ${message.slice(0, 150)}`,
-      turnCount,
-    )
+    this.episodesStore.upsert(sessionId, userMessage.slice(0, 150), turnCount)
 
-    // 5. EVOLVE: 每 20 轮触发进化
+    // Every 5 turns, extract facts from conversation with DeepSeek
     const totalTurns = this.eventLog.count()
-    if (totalTurns % 20 === 0 && totalTurns > 0) {
-      const prev = this.factsStore.currentVersion()
-      this.factsStore.commit()
-      console.log(`[EVOLVE] facts ${prev} → ${this.factsStore.currentVersion()} (turn ${totalTurns})`)
+    if (totalTurns % 5 === 0 && totalTurns > 0) {
+      try {
+        const apiKey = getApiKey()
+        const extractionPrompt = `Extract key facts, preferences, and knowledge from this conversation. Return ONLY a JSON array of objects with: category (preference/fact/constraint/goal/context), importance (1-5), content (short sentence).\n\n${conversation}\n\n[JSON array]:`
+
+        const result = await deepseekChat([{ role: 'user', content: extractionPrompt }], apiKey)
+        const jsonMatch = result.match(/\[[\s\S]*\]/)
+        if (jsonMatch) {
+          const facts = JSON.parse(jsonMatch[0])
+          for (const f of facts) {
+            if (f.category && f.content) {
+              this.factsStore.add({
+                category: f.category,
+                importance: Math.min(5, Math.max(1, f.importance || 3)),
+                content: f.content,
+              })
+            }
+          }
+          this.factsStore.commit()
+          console.log(`[EVOLVE] Extracted ${facts.length} facts (turn ${totalTurns})`)
+        }
+      } catch (err) {
+        console.log('[EVOLVE] Fact extraction skipped:', (err as Error).message.slice(0, 100))
+      }
     }
   }
 }

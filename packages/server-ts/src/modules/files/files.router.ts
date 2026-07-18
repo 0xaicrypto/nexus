@@ -21,11 +21,10 @@ export async function filesRouter(app: FastifyInstance) {
     fs.writeFileSync(filepath, buffer)
 
     return {
-      fileId: filename,
-      filename: data.filename,
-      contentType: data.mimetype,
-      sizeBytes: buffer.length,
-      uploadedAt: new Date().toISOString(),
+      file_id: filename,
+      name: data.filename,
+      mime: data.mimetype,
+      size_bytes: buffer.length,
     }
   })
 

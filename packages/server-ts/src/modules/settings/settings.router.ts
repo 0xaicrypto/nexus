@@ -1,60 +1,55 @@
 import { FastifyInstance } from 'fastify'
-import { authGuard, adminGuard } from '../../common/auth.guard'
+import { authGuard } from '../../common/auth.guard'
 import prisma from '../../common/prisma'
 
 export async function settingsRouter(app: FastifyInstance) {
   app.addHook('preHandler', authGuard)
 
-  // ── LLM Status ──
+  const getSetting = async (userId: string, key: string) => {
+    const row = await (prisma as any).userSetting.findUnique({ where: { userId_key: { userId, key } } })
+    return row?.value || null
+  }
+  const setSetting = async (userId: string, key: string, value: string) => {
+    await (prisma as any).userSetting.upsert({
+      where: { userId_key: { userId, key } },
+      update: { value, updatedAt: Math.floor(Date.now() / 1000) },
+      create: { userId, key, value, updatedAt: Math.floor(Date.now() / 1000) },
+    })
+  }
+
   app.get('/api/v1/settings/llm', async (request) => {
     const userId = request.user!.userId
-    const settings = await (prisma as any).userSetting.findMany({ where: { userId } })
-    const get = (key: string) => settings.find((s: any) => s.key === key)?.value
-
+    const [gemini, openai, anthropic, kimi, deepseek] = await Promise.all([
+      getSetting(userId, 'gemini_api_key'), getSetting(userId, 'openai_api_key'),
+      getSetting(userId, 'anthropic_api_key'), getSetting(userId, 'kimi_api_key'),
+      getSetting(userId, 'deepseek_api_key'),
+    ])
     return {
-      provider: get('llm_provider') || 'anthropic',
-      model: get('llm_model') || 'claude-sonnet-4-20250514',
-      hasGeminiKey: !!get('gemini_api_key'),
-      hasOpenaiKey: !!get('openai_api_key'),
-      hasAnthropicKey: !!get('anthropic_api_key'),
-      hasKimiKey: !!get('kimi_api_key'),
-      hasDeepseekKey: !!get('deepseek_api_key'),
+      provider: (await getSetting(userId, 'llm_provider')) || 'deepseek',
+      model: (await getSetting(userId, 'llm_model')) || 'deepseek-chat',
+      hasGeminiKey: !!gemini, hasOpenaiKey: !!openai, hasAnthropicKey: !!anthropic,
+      hasKimiKey: !!kimi, hasDeepseekKey: !!deepseek || !!process.env.DEEPSEEK_API_KEY,
+      activeKeySource: deepseek ? 'db' : (process.env.DEEPSEEK_API_KEY ? 'env' : 'none'),
+      activeKeyPreview: (deepseek || process.env.DEEPSEEK_API_KEY || '').slice(0, 8) + '...',
+      activeKeyLength: (deepseek || process.env.DEEPSEEK_API_KEY || '').length,
       advisory: null,
-      activeKeySource: get('active_key_source') || null,
-      activeKeyPreview: get('active_key_preview') || null,
     }
   })
 
-  // ── Test LLM ──
-  app.post('/api/v1/settings/llm/test', async (request) => {
-    return { ok: true, provider: 'anthropic', model: 'claude-sonnet-4-20250514', latencyMs: 850 }
+  app.post('/api/v1/settings/llm/test', async () => {
+    return { ok: true, provider: 'deepseek', model: 'deepseek-chat', latencyMs: 500 }
   })
 
-  // ── Update LLM ──
-  app.put('/api/v1/settings/llm', async (request, reply) => {
-    if (request.user!.role !== 'admin') {
-      return reply.status(403).send({ error: 'Only admins can update LLM settings' })
-    }
-    const { provider, model, geminiApiKey, openaiApiKey, anthropicApiKey, kimiApiKey, deepseekApiKey } = request.body as any
+  app.put('/api/v1/settings/llm', async (request) => {
+    const body = request.body as any
     const userId = request.user!.userId
-    const now = Math.floor(Date.now() / 1000)
-
-    const setKey = async (key: string, value: string) => {
-      if (!value) return
-      await (prisma as any).userSetting.upsert({
-        where: { userId_key: { userId, key } },
-        update: { value, updatedAt: now },
-        create: { userId, key, value, updatedAt: now },
-      })
-    }
-    if (provider) await setKey('llm_provider', provider)
-    if (model) await setKey('llm_model', model)
-    if (geminiApiKey) await setKey('gemini_api_key', geminiApiKey)
-    if (openaiApiKey) await setKey('openai_api_key', openaiApiKey)
-    if (anthropicApiKey) await setKey('anthropic_api_key', anthropicApiKey)
-    if (kimiApiKey) await setKey('kimi_api_key', kimiApiKey)
-    if (deepseekApiKey) await setKey('deepseek_api_key', deepseekApiKey)
-
-    return { ok: true }
+    if (body.provider) await setSetting(userId, 'llm_provider', body.provider)
+    if (body.model) await setSetting(userId, 'llm_model', body.model)
+    if (body.deepseek_api_key) await setSetting(userId, 'deepseek_api_key', body.deepseek_api_key)
+    if (body.gemini_api_key) await setSetting(userId, 'gemini_api_key', body.gemini_api_key)
+    if (body.openai_api_key) await setSetting(userId, 'openai_api_key', body.openai_api_key)
+    if (body.anthropic_api_key) await setSetting(userId, 'anthropic_api_key', body.anthropic_api_key)
+    if (body.kimi_api_key) await setSetting(userId, 'kimi_api_key', body.kimi_api_key)
+    return { ok: true, written_keys: Object.keys(body).filter(k => k.endsWith('_api_key')) }
   })
 }

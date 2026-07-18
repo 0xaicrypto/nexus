@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
 export const createStudySchema = z.object({
-  name: z.string().min(1).max(200),
-  shortCode: z.string().min(1).max(20).regex(/^[A-Z0-9_-]+$/, 'Short code must be uppercase alphanumeric'),
+  display_name: z.string().min(1).max(200),
+  short_code: z.string().min(1).max(20).regex(/^[A-Z0-9_-]+$/, 'Short code must be uppercase alphanumeric'),
 })
 
 export const enrollPatientSchema = z.object({
-  patientHash: z.string().min(1),
+  patient_hash: z.string().min(1),
   arm: z.string().optional(),
 })
 
