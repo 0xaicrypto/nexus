@@ -25,3 +25,14 @@ pm2 save
 
 sleep 3
 curl -fsS http://localhost:8001/healthz && echo "OK" || echo "FAIL"
+
+# Build web frontend + serve via nginx
+cd ~/heurion/packages/web
+pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+pnpm build
+chmod -R +rx dist
+chmod +rx /root /root/heurion /root/heurion/packages /root/heurion/packages/web 2>/dev/null || true
+
+# Ensure nginx is running
+which nginx || { apt-get update -qq && apt-get install -y -qq nginx; }
+systemctl reload nginx 2>/dev/null || nginx
