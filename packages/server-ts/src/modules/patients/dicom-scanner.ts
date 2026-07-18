@@ -1,8 +1,8 @@
 import fs from 'fs'
 import path from 'path'
+import zlib from 'zlib'
 
 let dicomParser: any = null
-let sharp: any = null
 try {
   dicomParser = require('dicom-parser')
   sharp = require('sharp')
@@ -85,37 +85,51 @@ export function renderDicomSlice(userId: string, fileId: string): Buffer | null 
       gray[i] = Math.max(0, Math.min(255, Math.round((hu - low) / ww * 255)))
     }
 
-    // Create BMP if sharp not available (zero-dependency fallback)
+    // Create PNG (zero dependencies, browser-compatible)
     const scale = Math.min(1, 256 / Math.max(rows, cols))
     const outW = Math.floor(cols * scale)
     const outH = Math.floor(rows * scale)
-    const rowSize = Math.floor((outW * 3 + 3) / 4) * 4
-    const imageSize = rowSize * outH
-    const fileSize = 54 + imageSize
 
-    const bmp = Buffer.alloc(fileSize)
-    bmp.write('BM', 0)
-    bmp.writeUInt32LE(fileSize, 2)
-    bmp.writeUInt32LE(54, 10) // offset to pixels
-    bmp.writeUInt32LE(40, 14) // DIB header size
-    bmp.writeInt32LE(outW, 18)
-    bmp.writeInt32LE(outH, 22)
-    bmp.writeUInt16LE(1, 26) // planes
-    bmp.writeUInt16LE(24, 28) // bpp
-    bmp.writeUInt32LE(imageSize, 34)
-
+    // Build raw image data with filter byte 0 per row
+    const raw = Buffer.alloc(outH * (1 + outW))
     for (let y = 0; y < outH; y++) {
+      raw[y * (1 + outW)] = 0 // filter: none
       const srcY = Math.floor(y / scale)
       for (let x = 0; x < outW; x++) {
         const srcX = Math.floor(x / scale)
-        const val = gray[srcY * cols + srcX]
-        const offset = 54 + (outH - 1 - y) * rowSize + x * 3
-        bmp[offset] = val     // B
-        bmp[offset + 1] = val // G
-        bmp[offset + 2] = val // R
+        raw[y * (1 + outW) + 1 + x] = gray[srcY * cols + srcX]
       }
     }
-    return bmp
+
+    // Deflate the raw data
+    const deflated = zlib.deflateSync(raw)
+
+    // Helper: create PNG chunk
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0)
+      const crcData = Buffer.concat([Buffer.from(type), data])
+      const crc = crc32(crcData)
+      const crcBuf = Buffer.alloc(4); crcBuf.writeUInt32BE(crc, 0)
+      return Buffer.concat([len, Buffer.from(type), data, crcBuf])
+    }
+
+    // IHDR
+    const ihdr = Buffer.alloc(13)
+    ihdr.writeUInt32BE(outW, 0); ihdr.writeUInt32BE(outH, 4)
+    ihdr[8] = 8  // bit depth
+    ihdr[9] = 0  // grayscale
+    ihdr[10] = 0 // deflate
+    ihdr[11] = 0 // adaptive filter
+    ihdr[12] = 0 // non-interlaced
+
+    const png = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), // PNG signature
+      chunk('IHDR', ihdr),
+      chunk('IDAT', deflated),
+      chunk('IEND', Buffer.alloc(0)),
+    ])
+
+    return png
   } catch {
     return null
   }
@@ -123,4 +137,13 @@ export function renderDicomSlice(userId: string, fileId: string): Buffer | null 
 
 function getDicomPath(userId: string, fileId: string): string {
   return path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', userId, 'uploads', fileId)
+}
+
+function crc32(buf: Buffer): number {
+  let crc = 0xFFFFFFFF
+  for (let i = 0; i < buf.length; i++) {
+    crc ^= buf[i]
+    for (let j = 0; j < 8; j++) crc = (crc >>> 1) ^ (crc & 1 ? 0xEDB88320 : 0)
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0
 }

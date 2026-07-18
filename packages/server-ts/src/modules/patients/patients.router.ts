@@ -125,7 +125,7 @@ export async function patientsRouter(app: FastifyInstance) {
     const studyId = (request.params as any).studyId
     const bmp = renderDicomSlice(request.user!.userId, studyId)
     if (bmp) {
-      reply.header('Content-Type', 'image/bmp')
+      reply.header('Content-Type', 'image/png')
       reply.header('Cache-Control', 'public, max-age=3600')
       return bmp
     }
