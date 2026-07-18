@@ -5,8 +5,7 @@ import zlib from 'zlib'
 let dicomParser: any = null
 try {
   dicomParser = require('dicom-parser')
-  sharp = require('sharp')
-} catch { /* optional, tsx handles require() */ }
+} catch { /* optional */ }
 
 export interface DicomFinding {
   type: string
