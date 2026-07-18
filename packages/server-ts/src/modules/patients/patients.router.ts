@@ -123,11 +123,11 @@ export async function patientsRouter(app: FastifyInstance) {
 
   app.get('/api/v1/dicom/studies/:studyId/series/:seriesIdx/render', async (request, reply) => {
     const studyId = (request.params as any).studyId
-    const png = renderDicomSlice(request.user!.userId, studyId)
-    if (png) {
-      reply.header('Content-Type', 'image/png')
+    const bmp = renderDicomSlice(request.user!.userId, studyId)
+    if (bmp) {
+      reply.header('Content-Type', 'image/bmp')
       reply.header('Cache-Control', 'public, max-age=3600')
-      return png
+      return bmp
     }
     reply.header('Content-Type', 'image/png')
     return Buffer.alloc(1)
