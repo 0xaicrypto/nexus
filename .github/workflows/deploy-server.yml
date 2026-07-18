@@ -40,13 +40,35 @@ jobs:
       - uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
-      - name: Deploy to staging
+      - name: Deploy staging + run regression
         env:
-          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} 'DEEPSEEK_KEY=$DEEPSEEK_KEY GEMINI_KEY=$GEMINI_KEY bash -s' < scripts/deploy-staging.sh
-      - name: Run regression
-        run: ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} 'cd ~/heurion && bash scripts/regression-test.sh http://localhost:8002'
+          DK: ${{ secrets.DEEPSEEK_API_KEY }}
+          GK: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "bash -s" << 'ENDRUN'
+set -e
+cd ~/heurion && git pull origin main
+cd packages/server-ts
+cat > .env << ENVEOF
+DATABASE_URL="file:./staging.db"
+SERVER_PORT=8002
+SERVER_SECRET=staging-$(openssl rand -hex 8)
+DEEPSEEK_API_KEY=${DK}
+GEMINI_API_KEY=${GK}
+CORS_ALLOW_ORIGINS=*
+TWIN_BASE_DIR=.nexus/staging-twins
+ENVEOF
+pnpm install --frozen-lockfile
+npx prisma generate
+npx prisma db push --accept-data-loss
+pm2 delete heurion-staging 2>/dev/null || true
+pm2 start npx --name heurion-staging -- tsx src/main.ts
+pm2 save
+sleep 3
+curl -fsS http://localhost:8002/healthz
+echo "Staging OK — running regression"
+bash scripts/regression-test.sh http://localhost:8002
+ENDRUN
 
   deploy:
     name: Deploy to Production
