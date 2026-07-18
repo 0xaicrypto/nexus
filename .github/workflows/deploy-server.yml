@@ -45,14 +45,14 @@ jobs:
           DK: ${{ secrets.DEEPSEEK_API_KEY }}
           GK: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "bash -s" << 'ENDRUN'
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "bash -s" << ENDRUN
 set -e
 cd ~/heurion && git pull origin main
 cd packages/server-ts
 cat > .env << ENVEOF
 DATABASE_URL="file:./staging.db"
 SERVER_PORT=8002
-SERVER_SECRET=staging-$(openssl rand -hex 8)
+SERVER_SECRET=staging-\$(openssl rand -hex 8)
 DEEPSEEK_API_KEY=${DK}
 GEMINI_API_KEY=${GK}
 CORS_ALLOW_ORIGINS=*
