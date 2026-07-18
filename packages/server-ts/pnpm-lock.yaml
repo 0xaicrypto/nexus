@@ -23,6 +23,9 @@ importers:
       bcryptjs:
         specifier: ^2.4.3
         version: 2.4.3
+      dicom-parser:
+        specifier: ^1.8.21
+        version: 1.8.21
       dotenv:
         specifier: ^16.0.0
         version: 16.6.1
@@ -717,6 +720,9 @@ packages:
   depd@2.0.0:
     resolution: {integrity: sha512-g7nH6P6dyDioJogAAGprGpCtVImJhpPk/roCzdb3fIh61/s/nPsfR6onyMwkCAR/OlC3yBC0lESvUoQEAssIrw==}
     engines: {node: '>= 0.8'}
+
+  dicom-parser@1.8.21:
+    resolution: {integrity: sha512-lYCweHQDsC8UFpXErPlg86Px2A8bay0HiUY+wzoG3xv5GzgqVHU3lziwSc/Gzn7VV7y2KeP072SzCviuOoU02w==}
 
   diff-sequences@29.6.3:
     resolution: {integrity: sha512-EjePK1srD3P08o2j4f0ExnylqRs5B9tJjcp9t1krH2qRi8CCdsYfwe9JgSLurFBWwq4uOlipzfk5fHNvwFKr8Q==}
@@ -1734,6 +1740,8 @@ snapshots:
       type-detect: 4.1.0
 
   depd@2.0.0: {}
+
+  dicom-parser@1.8.21: {}
 
   diff-sequences@29.6.3: {}
 

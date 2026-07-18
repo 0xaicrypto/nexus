@@ -4,6 +4,7 @@ import prisma from '../../common/prisma.js'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import { quickScanDicom } from './dicom-scanner.js'
 
 function uid() { return crypto.randomBytes(8).toString('hex') }
 
@@ -99,14 +100,9 @@ export async function patientsRouter(app: FastifyInstance) {
   })
 
   app.post('/api/v1/dicom/studies/:studyId/quick-scan', async (request) => {
-    // Quick Scan requires Python worker (pydicom + MONAI)
-    // TS backend returns a meaningful status
-    return {
-      ok: true,
-      status: 'queued',
-      message: 'DICOM analysis requires Python worker. Text reports available in Chat for AI analysis.',
-      study_id: (request.params as any).studyId,
-    }
+    const studyId = (request.params as any).studyId
+    const findings = quickScanDicom(request.user!.userId, studyId)
+    return { ok: true, findings, study_id: studyId }
   })
 
   app.post('/api/v1/dicom/send-to-agent', async (request) => {

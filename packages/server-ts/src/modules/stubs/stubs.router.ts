@@ -13,11 +13,6 @@ export async function stubRouter(app: FastifyInstance) {
     return { archived: true, patient_hash: (request.params as any).hash }
   })
 
-  // ── Send DICOM slice to agent ──
-  app.post('/api/v1/dicom/send-to-agent', async () => {
-    return { ok: true }
-  })
-
   // ── Report download ──
   app.get('/api/v1/report/pdf/:hash', async (request, reply) => {
     reply.header('Content-Type', 'application/pdf')
