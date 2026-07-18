@@ -4,7 +4,7 @@ import prisma from '../../common/prisma.js'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { quickScanDicom } from './dicom-scanner.js'
+import { quickScanDicom, renderDicomSlice } from './dicom-scanner.js'
 
 function uid() { return crypto.randomBytes(8).toString('hex') }
 
@@ -94,14 +94,40 @@ export async function patientsRouter(app: FastifyInstance) {
     return { study_id: (request.params as any).studyId, patient_hash: '', modality: 'CT', series: [] }
   })
 
-  app.get('/api/v1/dicom/studies/:studyId/series/:seriesIdx/render', async (_req, reply) => {
+  app.get('/api/v1/dicom/studies/:studyId/series/:seriesIdx/render', async (request, reply) => {
+    const studyId = (request.params as any).studyId
+    const png = await renderDicomSlice(request.user!.userId, studyId)
+    if (png) {
+      reply.header('Content-Type', 'image/png')
+      reply.header('Cache-Control', 'public, max-age=3600')
+      return png
+    }
     reply.header('Content-Type', 'image/png')
     return Buffer.alloc(1)
   })
 
+  // #2: Quick Scan + update patient profile
   app.post('/api/v1/dicom/studies/:studyId/quick-scan', async (request) => {
     const studyId = (request.params as any).studyId
-    const findings = quickScanDicom(request.user!.userId, studyId)
+    const userId = request.user!.userId
+    const findings = quickScanDicom(userId, studyId)
+
+    // Update patient with scan findings
+    const text = findings.filter((f: any) => f.type !== 'meta' && f.type !== 'error')
+      .map((f: any) => f.content).join(' | ')
+    if (text && text.length > 5) {
+      const allPatients = await (prisma as any).patientRecord.findMany({ where: { userId }, orderBy: { createdAt: 'desc' }, take: 1 })
+      if (allPatients.length > 0) {
+        const existing = allPatients[0].chiefComplaint || ''
+        if (!existing.includes(text.slice(0, 50))) {
+          await (prisma as any).patientRecord.update({
+            where: { hash: allPatients[0].hash },
+            data: { chiefComplaint: (existing + '\n[Scan] ' + text.slice(0, 300)).trim(), updatedAt: new Date().toISOString() }
+          })
+        }
+      }
+    }
+
     return { ok: true, findings, study_id: studyId }
   })
 

@@ -2,11 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { createRequire } from 'module'
 
-// Pure TypeScript DICOM parser — no Python needed
 let dicomParser: any = null
+let sharp: any = null
 try {
   const require = createRequire(import.meta.url)
   dicomParser = require('dicom-parser')
+  sharp = require('sharp')
 } catch { /* optional */ }
 
 export interface DicomFinding {
@@ -15,84 +16,89 @@ export interface DicomFinding {
 }
 
 export function quickScanDicom(userId: string, fileId: string): DicomFinding[] {
-  const dir = path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', userId, 'uploads')
-  const filepath = path.join(dir, fileId)
+  const filepath = getDicomPath(userId, fileId)
+  if (!fs.existsSync(filepath)) return [{ type: 'error', content: 'File not found' }]
 
-  if (!fs.existsSync(filepath)) {
-    return [{ type: 'error', content: 'File not found' }]
-  }
-
-  // Try dicom-parser first
   if (dicomParser) {
     try {
       const buffer = fs.readFileSync(filepath)
-      const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
-      const dataSet = dicomParser.parseDicom(new Uint8Array(arrayBuffer))
-
+      const arr = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+      const dataSet = dicomParser.parseDicom(new Uint8Array(arr))
       const findings: DicomFinding[] = []
 
-      const getTag = (tag: string) => {
-        try { return dataSet.string(tag) } catch { return null }
-      }
-      const getTagNum = (tag: string) => {
-        try { return dataSet.uint16(tag) } catch { return 0 }
-      }
+      const s = (tag: string) => { try { return dataSet.string(tag) } catch { return null } }
+      const n = (tag: string) => { try { return dataSet.uint16(tag) } catch { return 0 } }
 
-      const name = getTag('x00100010')
-      const id = getTag('x00100020')
-      const sex = getTag('x00100040')
-      const age = getTag('x00101010')
-      if (name || id) {
-        findings.push({ type: 'patient', content: `Patient: ${name || '?'}, ID: ${id || '?'}, Sex: ${sex || '?'}, Age: ${age || '?'}` })
-      }
+      const name = s('x00100010'); const id = s('x00100020'); const sex = s('x00100040'); const age = s('x00101010')
+      if (name || id) findings.push({ type: 'patient', content: `${name || '?'} | ID:${id || '?'} | ${sex || '?'} | ${age || '?'}` })
 
-      const studyDesc = getTag('x00081030')
-      const studyDate = getTag('x00080020')
-      const modality = getTag('x00080060')
-      if (studyDesc) {
-        findings.push({ type: 'study', content: `Study: ${studyDesc}, Date: ${studyDate || '?'}, Modality: ${modality || '?'}` })
-      }
+      const studyDesc = s('x00081030'); const studyDate = s('x00080020'); const modality = s('x00080060')
+      if (studyDesc) findings.push({ type: 'study', content: `${studyDesc} | ${studyDate || '?'} | ${modality || '?'}` })
 
-      const institution = getTag('x00080080')
-      const manufacturer = getTag('x00080070')
-      const model = getTag('x00081090')
-      if (institution || manufacturer) {
-        findings.push({ type: 'institution', content: `Institution: ${institution || '?'}, Device: ${manufacturer || '?'} ${model || ''}` })
-      }
+      const inst = s('x00080080'); const manu = s('x00080070'); const mdl = s('x00081090')
+      if (inst || manu) findings.push({ type: 'institution', content: `${inst || '?'} | ${manu || '?'} ${mdl || ''}` })
 
-      const rows = getTagNum('x00280010')
-      const cols = getTagNum('x00280011')
-      const sliceThickness = getTag('x00180050')
-      const windowCenter = getTag('x00281050')
-      const windowWidth = getTag('x00281051')
-      if (rows > 0) {
-        findings.push({ type: 'image', content: `Image: ${rows}x${cols}${sliceThickness ? `, Slice: ${sliceThickness}mm` : ''}${windowCenter ? `, Window: ${windowCenter}/${windowWidth}` : ''}` })
-      }
+      const rows = n('x00280010'); const cols = n('x00280011')
+      if (rows > 0) findings.push({ type: 'image', content: `${rows}x${cols} | ${s('x00180050') || '?'}mm` })
 
-      const comments = getTag('x00204000')
-      if (comments) {
-        findings.push({ type: 'findings', content: comments })
-      }
+      const comments = s('x00204000')
+      if (comments) findings.push({ type: 'findings', content: comments })
 
-      // Count number of tags found
-      const tagCount = Object.keys(dataSet.elements || {}).length
-      findings.push({ type: 'meta', content: `DICOM parsed: ${tagCount} tags extracted` })
-
+      findings.push({ type: 'meta', content: `${Object.keys(dataSet.elements || {}).length} DICOM tags` })
       return findings
     } catch (e: any) {
-      return [{ type: 'error', content: `DICOM parse error: ${e.message}` }]
+      return [{ type: 'error', content: e.message }]
     }
   }
-
-  // Fallback: try reading as text (works for text reports)
   try {
     const text = fs.readFileSync(filepath, 'utf-8').slice(0, 5000)
-    if (text.trim()) {
-      return [{ type: 'text_content', content: text }]
-    }
-  } catch {
-    return [{ type: 'error', content: 'Cannot read file — try uploading as .txt report' }]
-  }
+    if (text.trim()) return [{ type: 'text_content', content: text }]
+  } catch {}
+  return [{ type: 'error', content: 'Cannot read' }]
+}
 
-  return [{ type: 'error', content: 'dicom-parser not installed' }]
+/**
+ * Render DICOM pixel data as PNG thumbnail (max 256px)
+ */
+export async function renderDicomSlice(userId: string, fileId: string): Promise<Buffer | null> {
+  const filepath = getDicomPath(userId, fileId)
+  if (!fs.existsSync(filepath) || !dicomParser || !sharp) return null
+
+  try {
+    const buffer = fs.readFileSync(filepath)
+    const arr = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    const dataSet = dicomParser.parseDicom(new Uint8Array(arr))
+
+    const rows = dataSet.uint16('x00280010')
+    const cols = dataSet.uint16('x00280011')
+    if (!rows || !cols) return null
+
+    const pixelData = new Uint16Array(dataSet.byteArray.buffer, dataSet.byteArray.byteOffset, rows * cols)
+    const wc = parseFloat((dataSet.string('x00281050') || '40').split('\\')[0])
+    const ww = parseFloat((dataSet.string('x00281051') || '400').split('\\')[0])
+    const ri = parseFloat(dataSet.string('x00281052') || '-1000')
+    const rs = parseFloat(dataSet.string('x00281053') || '1')
+
+    // Convert to 8-bit grayscale with window/level
+    const gray = Buffer.alloc(rows * cols)
+    for (let i = 0; i < rows * cols; i++) {
+      const hu = pixelData[i] * rs + ri
+      const low = wc - ww / 2
+      gray[i] = Math.max(0, Math.min(255, Math.round((hu - low) / ww * 255)))
+    }
+
+    // Create PNG with sharp
+    const png = await sharp(gray, { raw: { width: cols, height: rows, channels: 1 } })
+      .resize(256, 256, { fit: 'inside' })
+      .png()
+      .toBuffer()
+
+    return png
+  } catch {
+    return null
+  }
+}
+
+function getDicomPath(userId: string, fileId: string): string {
+  return path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', userId, 'uploads', fileId)
 }
