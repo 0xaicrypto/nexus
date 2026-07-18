@@ -134,7 +134,93 @@ export function renderDicomSlice(userId: string, fileId: string): Buffer | null 
   }
 }
 
-function getDicomPath(userId: string, fileId: string): string {
+/**
+ * Analyze DICOM image with Gemini Vision
+ * Sends the rendered PNG to Gemini for AI-powered finding detection
+ */
+export async function analyzeWithGeminiVision(userId: string, fileId: string): Promise<string> {
+  const filepath = getDicomPath(userId, fileId)
+  if (!fs.existsSync(filepath) || !dicomParser) return ''
+
+  try {
+    const buffer = fs.readFileSync(filepath)
+    const arr = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+    const dataSet = dicomParser.parseDicom(new Uint8Array(arr))
+    const rows = dataSet.uint16('x00280010')
+    const cols = dataSet.uint16('x00280011')
+    if (!rows || !cols) return ''
+
+    const pixelData = new Uint16Array(dataSet.byteArray.buffer, dataSet.byteArray.byteOffset, rows * cols)
+    const wc = parseFloat((dataSet.string('x00281050') || '40').split('\\')[0])
+    const ww = parseFloat((dataSet.string('x00281051') || '400').split('\\')[0])
+    const ri = parseFloat(dataSet.string('x00281052') || '-1000')
+    const rs = parseFloat(dataSet.string('x00281053') || '1')
+
+    const gray = Buffer.alloc(rows * cols)
+    for (let i = 0; i < rows * cols; i++) {
+      const hu = pixelData[i] * rs + ri
+      gray[i] = Math.max(0, Math.min(255, Math.round((hu - (wc - ww/2)) / ww * 255)))
+    }
+
+    // Render 512x512 PNG with simple header for higher quality
+    const scale = Math.min(1, 512 / Math.max(rows, cols))
+    const outW = Math.floor(cols * scale)
+    const outH = Math.floor(rows * scale)
+    const raw = Buffer.alloc(outH * (1 + outW))
+    for (let y = 0; y < outH; y++) {
+      raw[y * (1 + outW)] = 0
+      const srcY = Math.floor(y / scale)
+      for (let x = 0; x < outW; x++) {
+        raw[y * (1 + outW) + 1 + x] = gray[Math.floor(srcY) * cols + Math.floor(x / scale)]
+      }
+    }
+    const deflated = zlib.deflateSync(raw)
+    const chunk = (type: string, data: Buffer): Buffer => {
+      const len = Buffer.alloc(4); len.writeUInt32BE(data.length, 0)
+      const crc = crc32(Buffer.concat([Buffer.from(type), data]))
+      const cb = Buffer.alloc(4); cb.writeUInt32BE(crc, 0)
+      return Buffer.concat([len, Buffer.from(type), data, cb])
+    }
+    const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(outW, 0); ihdr.writeUInt32BE(outH, 4)
+    ihdr[8]=8; ihdr[9]=0; ihdr[10]=0; ihdr[11]=0; ihdr[12]=0
+    const png = Buffer.concat([
+      Buffer.from([137,80,78,71,13,10,26,10]),
+      chunk('IHDR', ihdr), chunk('IDAT', deflated), chunk('IEND', Buffer.alloc(0)),
+    ])
+    const base64 = png.toString('base64')
+
+    // Get Gemini API key from DB
+    const { PrismaClient } = require('@prisma/client')
+    const prisma = new PrismaClient()
+    const setting = await (prisma as any).userSetting.findUnique({
+      where: { userId_key: { userId, key: 'gemini_api_key' } },
+    })
+    await prisma.$disconnect()
+    const apiKey = setting?.value || process.env.GEMINI_API_KEY || ''
+
+    if (!apiKey || apiKey.length < 10) return ''
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: 'Analyze this chest CT image. List any abnormalities, nodules, masses, or findings in Chinese. Keep it concise (3-5 bullet points).' },
+              { inlineData: { mimeType: 'image/png', data: base64 } },
+            ],
+          }],
+        }),
+      },
+    )
+    const data = await resp.json()
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+  } catch (e: any) {
+    return ''
+  }
+}
   const dir = path.join(process.env.TWIN_BASE_DIR || '.nexus/twins', userId, 'uploads')
   // Try exact match first, then .dcm extension
   let p = path.join(dir, fileId)
