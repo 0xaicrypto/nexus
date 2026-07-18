@@ -1,38 +1,15 @@
-# Heurion Server CI/CD — build + deploy on push to main
+# Heurion Server CI/CD — deploy on push to main
 
 name: Deploy Server
 
 on:
-  pull_request:
-    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
 
 jobs:
-  web-build:
-    name: Build web UI
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/web
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v3
-        with:
-          version: '9'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-          cache-dependency-path: packages/web/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsc --noEmit
-      - run: pnpm build
-
   deploy:
     name: Deploy to VPS
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: production
