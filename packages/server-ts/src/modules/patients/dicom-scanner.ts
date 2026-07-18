@@ -58,9 +58,9 @@ export function quickScanDicom(userId: string, fileId: string): DicomFinding[] {
 /**
  * Render DICOM pixel data as PNG thumbnail (max 256px)
  */
-export async function renderDicomSlice(userId: string, fileId: string): Promise<Buffer | null> {
+export function renderDicomSlice(userId: string, fileId: string): Buffer | null {
   const filepath = getDicomPath(userId, fileId)
-  if (!fs.existsSync(filepath) || !dicomParser || !sharp) return null
+  if (!fs.existsSync(filepath) || !dicomParser) return null
 
   try {
     const buffer = fs.readFileSync(filepath)
@@ -85,13 +85,37 @@ export async function renderDicomSlice(userId: string, fileId: string): Promise<
       gray[i] = Math.max(0, Math.min(255, Math.round((hu - low) / ww * 255)))
     }
 
-    // Create PNG with sharp
-    const png = await sharp(gray, { raw: { width: cols, height: rows, channels: 1 } })
-      .resize(256, 256, { fit: 'inside' })
-      .png()
-      .toBuffer()
+    // Create BMP if sharp not available (zero-dependency fallback)
+    const scale = Math.min(1, 256 / Math.max(rows, cols))
+    const outW = Math.floor(cols * scale)
+    const outH = Math.floor(rows * scale)
+    const rowSize = Math.floor((outW * 3 + 3) / 4) * 4
+    const imageSize = rowSize * outH
+    const fileSize = 54 + imageSize
 
-    return png
+    const bmp = Buffer.alloc(fileSize)
+    bmp.write('BM', 0)
+    bmp.writeUInt32LE(fileSize, 2)
+    bmp.writeUInt32LE(54, 10) // offset to pixels
+    bmp.writeUInt32LE(40, 14) // DIB header size
+    bmp.writeInt32LE(outW, 18)
+    bmp.writeInt32LE(outH, 22)
+    bmp.writeUInt16LE(1, 26) // planes
+    bmp.writeUInt16LE(24, 28) // bpp
+    bmp.writeUInt32LE(imageSize, 34)
+
+    for (let y = 0; y < outH; y++) {
+      const srcY = Math.floor(y / scale)
+      for (let x = 0; x < outW; x++) {
+        const srcX = Math.floor(x / scale)
+        const val = gray[srcY * cols + srcX]
+        const offset = 54 + (outH - 1 - y) * rowSize + x * 3
+        bmp[offset] = val     // B
+        bmp[offset + 1] = val // G
+        bmp[offset + 2] = val // R
+      }
+    }
+    return bmp
   } catch {
     return null
   }
