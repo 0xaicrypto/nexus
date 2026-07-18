@@ -80,6 +80,13 @@ export class ChatOrchestrator {
             }
           }
           this.factsStore.commit()
+          this.eventLog.append({
+            timestamp: Date.now() / 1000,
+            eventType: 'evolution',
+            content: `🧠 Extracted ${facts.length} new facts`,
+            metadata: { factCount: facts.length, categories: [...new Set(facts.map((f: any) => f.category))] },
+            agentId: userId, sessionId,
+          })
           console.log(`[EVOLVE] Extracted ${facts.length} facts (turn ${totalTurns})`)
         }
       } catch (err) {
