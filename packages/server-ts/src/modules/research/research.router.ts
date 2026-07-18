@@ -92,4 +92,12 @@ export async function researchRouter(app: FastifyInstance) {
     const { studyId, visitName } = request.params as any
     return { ok: await service.completeAssessment(studyId, visitName) }
   })
+
+  // Step 3 workflow: Import protocol text (from file upload or paste)
+  app.post('/api/v1/research/studies/:studyId/import-protocol', async (request, reply) => {
+    const { studyId } = request.params as any
+    const { text } = request.body as any
+    if (!text) return reply.status(400).send({ error: 'text required' })
+    return service.importProtocol(studyId, text)
+  })
 }

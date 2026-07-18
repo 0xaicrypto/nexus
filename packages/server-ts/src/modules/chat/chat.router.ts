@@ -3,6 +3,7 @@ import { authGuard } from '../../common/auth.guard'
 import prisma from '../../common/prisma'
 import { getUserContext } from './user-context.js'
 import { deepseekStream, getApiKey } from '../../common/llm.js'
+import { analyzeChatForPatient, updatePatientFromFindings } from '../patients/clinical-analysis.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -92,8 +93,15 @@ export async function chatRouter(app: FastifyInstance) {
         metadata: {}, agentId: userId, sessionId: sid,
       })
 
-      // #2: Extract takeaway + evolve facts automatically
+      // #2: Extract takeaway + evolve facts + analyze patient chat
       ctx.orchestrator.postTurn(userId, sid, body.text).catch(() => {})
+
+      // Step 2: Analyze patient chat for clinical findings
+      if (patientHash) {
+        analyzeChatForPatient(userId, patientHash, `User: ${body.text}\nAI: ${fullResponse}`)
+          .then(findings => updatePatientFromFindings(userId, patientHash, findings))
+          .catch(() => {})
+      }
 
       // Update session
       await prisma.session.upsert({
