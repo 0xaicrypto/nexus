@@ -221,16 +221,35 @@ export class MemoryProjection {
 
   private async buildPatientContext(userId: string, patientHash: string): Promise<string> {
     try {
-      const nodes = await (prisma as any).$queryRawUnsafe(
+      // Try clinical_graph_nodes first
+      let nodes = await (prisma as any).$queryRawUnsafe(
         `SELECT node_type, content_json, weight, updated_at
          FROM clinical_graph_nodes
          WHERE user_id = ? AND patient_hash = ?
-         ORDER BY weight DESC
-         LIMIT 25`,
+         ORDER BY weight DESC LIMIT 25`,
         userId, patientHash
       ) as Array<{ node_type: string; content_json: string; weight: number; updated_at: number }>
 
-      if (!nodes.length) return ''
+      // Fallback: read from patient_records if graph is empty
+      if (!nodes || !nodes.length) {
+        const patient = await (prisma as any).patientRecord.findFirst({
+          where: { hash: patientHash, userId },
+        })
+        if (patient && patient.chiefComplaint) {
+          // Parse [tag] content format from chief_complaint
+          const tags = (patient.chiefComplaint as string).match(/\[(\w+)\]\s*([^\[\]]+)/g) || []
+          nodes = tags.map((t: string) => {
+            const m = t.match(/\[(\w+)\]\s*(.+)/)
+            return {
+              node_type: (m?.[1] || 'finding').replace(/_/g, ' '),
+              content_json: JSON.stringify({ text: (m?.[2] || t).trim() }),
+              weight: 5, updated_at: Date.now(),
+            }
+          })
+        }
+      }
+
+      if (!nodes || !nodes.length) return ''
 
       const lines = nodes.map(n => {
         try {
