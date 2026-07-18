@@ -17,8 +17,8 @@
 # Setup checklist (one-time, see docs/CICD.md for screenshots)
 # ────────────────────────────────────────────────────────────
 #   1. Repo Settings → Secrets:
-#        VPS_HOST=165.227.135.198
-#        VPS_USER=jimmy
+#     VPS_HOST=188.166.214.81
+#     VPS_USER=root
 #        VPS_SSH_KEY=<contents of an SSH private key whose pubkey is in
 #                     /home/jimmy/.ssh/authorized_keys on the VPS>
 #   2. Repo Settings → Actions → General:
@@ -305,8 +305,8 @@ jobs:
 
   # ── 5. SSH-deploy to the VPS (main only, after publish) ────────────
   deploy:
-    name: Deploy to VPS
-    needs: [publish]
+    name: Deploy TS Server to VPS
+    needs: [web-build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
@@ -327,17 +327,31 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Deploy + healthz + auto-rollback
-        # The actual deploy logic lives in scripts/deploy/vps_deploy.sh
-        # on the VPS itself, so it can be tested by SSH-ing in and
-        # running it manually. We just hand it the new tag and let it
-        # do the dance (pull, swap, probe, rollback on fail).
+      - name: Deploy TS Server to VPS
         env:
-          IMAGE: ghcr.io/${{ needs.publish.outputs.image }}
-          TAG:   ${{ needs.publish.outputs.image_tag }}
+          DEEPSEEK_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          # Trim the redundant "ghcr.io/" prefix the publish job's
-          # output already includes.
-          IMAGE_REF="${{ needs.publish.outputs.image }}:${{ needs.publish.outputs.image_tag }}"
-          ssh "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
-            "cd ~/nexus && bash scripts/deploy/vps_deploy.sh '$IMAGE_REF'"
+          ssh -o StrictHostKeyChecking=no "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+            "bash -s" << ENDSSH
+            set -e
+            cd ~/heurion || { git clone https://github.com/0xaicrypto/heurion.git ~/heurion && cd ~/heurion; }
+            git pull origin main
+            cd packages/server-ts
+            [ -f .env ] || cat > .env << ENVEOF
+DATABASE_URL="file:./nexus_server.db"
+SERVER_PORT=8001
+SERVER_SECRET=\$(openssl rand -hex 32)
+DEEPSEEK_API_KEY=${DEEPSEEK_KEY}
+CORS_ALLOW_ORIGINS=*
+ENVEOF
+            which pnpm || npm install -g pnpm@10
+            pnpm install --frozen-lockfile
+            npx prisma generate
+            npx prisma db push --accept-data-loss
+            which pm2 || npm install -g pm2
+            pm2 delete heurion 2>/dev/null || true
+            pm2 start npx --name heurion -- tsx src/main.ts
+            pm2 save
+            sleep 3
+            curl -fsS http://localhost:8001/healthz && echo "OK" || echo "FAIL"
+ENDSSH
