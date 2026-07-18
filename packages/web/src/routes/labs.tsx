@@ -149,11 +149,8 @@ export function LabsPage() {
       ) : (
         <div className="space-y-2">
           {files.map((f) => (
-            <Card
-              key={f.file_id}
-              className="flex cursor-pointer items-center gap-4 p-4 hover:bg-surface transition-colors"
-              onClick={() => handleViewFile(f.file_id)}
-            >
+            <div key={f.file_id} onClick={() => handleViewFile(f.file_id)} className="cursor-pointer">
+              <Card className="flex items-center gap-4 p-4 hover:bg-surface transition-colors">
               <FileText size={20} className="shrink-0 text-text-tertiary" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium text-text-primary">{f.name}</p>
@@ -163,6 +160,7 @@ export function LabsPage() {
               </div>
               <Badge variant="default">{f.mime.split('/')[0]}</Badge>
             </Card>
+            </div>
           ))}
         </div>
       )}

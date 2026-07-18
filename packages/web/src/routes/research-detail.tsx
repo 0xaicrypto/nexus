@@ -700,7 +700,7 @@ export function ResearchDetailPage() {
             </div>
           )}
 
-          {tab === 'protocol' && (
+          {tab === 'protocol' && studyId && (
             <ProtocolTab studyId={studyId} />
           )}
         </main>
