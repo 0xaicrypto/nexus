@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Paperclip } from 'lucide-react';
+import { Paperclip, Copy, Check } from 'lucide-react';
 import { api, ApiError } from '@/lib/api-client';
 import type { LlmStatus } from '@/lib/types';
 import { useAuthStore } from '@/stores/auth';
@@ -25,6 +25,7 @@ export function ChatPage() {
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -78,6 +79,16 @@ export function ChatPage() {
   };
 
   const handleStop = () => store.stopStream(sessionId);
+
+  const handleCopy = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      // ignore
+    }
+  };
 
   const toggleSkill = (name: string) => {
     setActiveSkills((prev) => prev.includes(name) ? prev.filter((s) => s !== name) : [...prev, name]);
@@ -152,12 +163,26 @@ export function ChatPage() {
                 className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                  className={`group relative max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                     m.role === 'user'
                       ? 'bg-accent text-white'
                       : 'border border-border bg-surface-elevated text-text-primary shadow-sm'
                   }`}
                 >
+                  {!m.isStreaming && (
+                    <button
+                      onClick={() => handleCopy(m.id, m.text || '')}
+                      className={`absolute -top-2 -right-2 rounded-full border border-border p-1 shadow-sm opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100 ${
+                        m.role === 'user'
+                          ? 'bg-accent text-white'
+                          : 'bg-surface text-text-secondary hover:text-text-primary'
+                      }`}
+                      title={t('common.copy', 'Copy')}
+                      aria-label={t('common.copy', 'Copy')}
+                    >
+                      {copiedId === m.id ? <Check size={12} /> : <Copy size={12} />}
+                    </button>
+                  )}
                   <MarkdownRenderer content={m.text || ''} />
                   {m.isStreaming ? <span className="animate-pulse" role="status" aria-label={t('chat.streaming')}>●</span> : null}
                 </div>
