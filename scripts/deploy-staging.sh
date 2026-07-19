@@ -2,7 +2,10 @@
 # Deploy to staging (port 8002)
 set -e
 cd ~/heurion
-git pull origin main
+# Ensure VPS matches origin/main exactly; any local changes are usually
+# leftover from a previous failed deploy and should not block updates.
+git fetch origin main
+git reset --hard origin/main
 cd packages/server-ts
 
 cp -f .env.staging .env 2>/dev/null || cat > .env << ENVEOF

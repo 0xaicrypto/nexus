@@ -3,7 +3,10 @@
 set -e
 
 cd ~/heurion || { git clone https://github.com/0xaicrypto/heurion.git ~/heurion && cd ~/heurion; }
-git pull origin main
+# Ensure VPS matches origin/main exactly; any local changes are usually
+# leftover from a previous failed deploy and should not block updates.
+git fetch origin main
+git reset --hard origin/main
 
 cd packages/server-ts
 
