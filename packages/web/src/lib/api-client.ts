@@ -425,23 +425,78 @@ class ApiClient {
 
   /* ────────────────────────── research detail ────────────────────────── */
 
-  async getStudyRoster(studyId: string): Promise<Array<{patient_hash: string; initials?: string; status: string; arm?: string; enrolled_at: string}>> {
+  async getStudyRoster(studyId: string): Promise<Array<{
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    chief_complaint?: string;
+    status: string;
+    arm?: string;
+    enrolled_at: string;
+  }>> {
     return this.fetch(`/api/v1/research/studies/${studyId}/roster`);
   }
 
-  async getStudyEligibility(studyId: string): Promise<{screenings: Array<{patient_hash: string; status: string; criteria_results?: Array<{criterion: string; passed: boolean}>}>}> {
+  async getStudyEligibility(studyId: string): Promise<{screenings: Array<{
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    status: string;
+    criteria_results?: Array<{criterion: string; passed: boolean}>;
+  }>}> {
     return this.fetch(`/api/v1/research/studies/${studyId}/eligibility`);
   }
 
-  async getStudyObservations(studyId: string): Promise<Array<{observation_id: string; patient_hash: string; category: string; ae_grade?: number; is_dlt?: boolean; confirmed?: boolean; created_at: string}>> {
+  async getStudyObservations(studyId: string): Promise<Array<{
+    observation_id: string;
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    category: string;
+    ae_grade?: number;
+    is_dlt?: boolean;
+    confirmed?: boolean;
+    created_at: string;
+  }>> {
     return this.fetch(`/api/v1/research/studies/${studyId}/observations`);
   }
 
-  async getStudyEnrollments(studyId: string): Promise<Array<{patient_hash: string; status: string; arm?: string; enrolled_at: string}>> {
+  async getStudyEnrollments(studyId: string): Promise<Array<{
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    chief_complaint?: string;
+    status: string;
+    arm?: string;
+    enrolled_at: string;
+  }>> {
     return this.fetch(`/api/v1/research/studies/${studyId}/enrollments`);
   }
 
-  async enrollPatient(studyId: string, patientHash: string, arm?: string): Promise<{patient_hash: string; status: string}> {
+  async enrollPatient(studyId: string, patientHash: string, arm?: string): Promise<{
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    chief_complaint?: string;
+    status: string;
+    arm?: string;
+    enrolled_at: string;
+  }> {
     return this.fetch(`/api/v1/research/studies/${studyId}/enrollments`, { method: 'POST', body: JSON.stringify({ patient_hash: patientHash, arm }) });
   }
 
@@ -461,7 +516,18 @@ class ApiClient {
     return this.fetch(`/api/v1/research/studies/${studyId}/observations/${obsId}/confirm`, { method: 'POST', body: JSON.stringify({ ae_grade: aeGrade, is_dlt: isDlt }) });
   }
 
-  async getStudyAssessments(studyId: string): Promise<Array<{visit_id: string; patient_hash: string; scheduled_at: string; status: string; completed_at?: string}>> {
+  async getStudyAssessments(studyId: string): Promise<Array<{
+    visit_id: string;
+    patient_hash: string;
+    patient_id: string;
+    name?: string;
+    initials?: string;
+    age_value?: number;
+    sex?: string;
+    scheduled_at: string;
+    status: string;
+    completed_at?: string;
+  }>> {
     return this.fetch(`/api/v1/research/studies/${studyId}/assessments`);
   }
 

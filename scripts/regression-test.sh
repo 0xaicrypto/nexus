@@ -90,6 +90,9 @@ check "7.3 Extract rules" "$([ "${RULES:-0}" -gt 0 ] && echo ok || echo 'FAIL')"
 curl -sf -X POST "$BASE/api/v1/research/studies/$SID/enrollments" -H "$H" -H "Content-Type: application/json" -d "{\"patient_hash\":\"$HASH\",\"arm\":\"Arm A\"}" > /dev/null 2>&1
 check "7.4 Enroll patient" ok
 check "7.5 Roster has entry" "$([ $(curl -sf "$BASE/api/v1/research/studies/$SID/roster" -H "$H" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null) -ge 1 ] && echo ok || echo 'FAIL')"
+check "7.5b Roster shows patient name" "$(curl -sf "$BASE/api/v1/research/studies/$SID/roster" -H "$H" | python3 -c "import sys,json; print('ok' if any(e.get('name')=='张强' for e in json.load(sys.stdin)) else 'FAIL')" 2>/dev/null)"
+check "7.5c Roster shows patient ID" "$(curl -sf "$BASE/api/v1/research/studies/$SID/roster" -H "$H" | python3 -c "import sys,json; print('ok' if any(e.get('patient_id')=='$HASH' for e in json.load(sys.stdin)) else 'FAIL')" 2>/dev/null)"
+check "7.5d Roster shows basic info" "$(curl -sf "$BASE/api/v1/research/studies/$SID/roster" -H "$H" | python3 -c "import sys,json; print('ok' if any(e.get('age_value')==58 and e.get('sex')=='M' for e in json.load(sys.stdin)) else 'FAIL')" 2>/dev/null)"
 check "7.6 Schedule tab data" "$(curl -sf "$BASE/api/v1/research/studies/$SID/assessments" -H "$H" | python3 -c "import sys,json; print('ok' if isinstance(json.load(sys.stdin), list) else 'FAIL')" 2>/dev/null)"
 check "7.7 Safety status" "$(curl -sf "$BASE/api/v1/research/studies/$SID/safety/stop-rule-status" -H "$H" | python3 -c "import sys,json; print('ok' if 'triggered_rules' in json.load(sys.stdin) else 'FAIL')" 2>/dev/null)"
 check "7.8 Eligibility list" "$(curl -sf "$BASE/api/v1/research/studies/$SID/eligibility" -H "$H" | python3 -c "import sys,json; print('ok' if 'screenings' in json.load(sys.stdin) else 'FAIL')" 2>/dev/null)"

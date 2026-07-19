@@ -19,7 +19,12 @@ interface StudyDetail {
 
 interface RosterEntry {
   patient_hash: string;
+  patient_id: string;
+  name?: string;
   initials?: string;
+  age_value?: number;
+  sex?: string;
+  chief_complaint?: string;
   status: string;
   arm?: string;
   enrolled_at: string;
@@ -27,6 +32,11 @@ interface RosterEntry {
 
 interface Screening {
   patient_hash: string;
+  patient_id: string;
+  name?: string;
+  initials?: string;
+  age_value?: number;
+  sex?: string;
   status: string;
   criteria_results?: Array<{criterion: string; passed: boolean}>;
 }
@@ -34,6 +44,11 @@ interface Screening {
 interface Observation {
   observation_id: string;
   patient_hash: string;
+  patient_id: string;
+  name?: string;
+  initials?: string;
+  age_value?: number;
+  sex?: string;
   category: string;
   ae_grade?: number;
   is_dlt?: boolean;
@@ -44,6 +59,11 @@ interface Observation {
 interface Assessment {
   visit_id: string;
   patient_hash: string;
+  patient_id: string;
+  name?: string;
+  initials?: string;
+  age_value?: number;
+  sex?: string;
   scheduled_at: string;
   status: string;
   completed_at?: string;
@@ -55,6 +75,12 @@ interface SafetyStatus {
 
 interface Enrollment {
   patient_hash: string;
+  patient_id: string;
+  name?: string;
+  initials?: string;
+  age_value?: number;
+  sex?: string;
+  chief_complaint?: string;
   status: string;
   arm?: string;
   enrolled_at: string;
@@ -423,7 +449,16 @@ export function ResearchDetailPage() {
                   <div className="space-y-2">
                     {enrollments.slice(0, 10).map((e, i) => (
                       <div key={`${e.patient_hash}-${i}`} className="flex items-center justify-between text-sm">
-                        <span className="font-mono text-text-secondary">{e.patient_hash.slice(0, 12)}...</span>
+                        <span className="text-text-secondary">
+                          {e.name || e.initials || e.patient_hash.slice(0, 12)}
+                          {e.age_value != null || e.sex ? (
+                            <span className="ml-2 text-xs text-text-tertiary">
+                              {e.age_value != null ? `${e.age_value}y` : ''}
+                              {e.age_value != null && e.sex ? ' / ' : ''}
+                              {e.sex || ''}
+                            </span>
+                          ) : null}
+                        </span>
                         <Badge variant={e.status === 'active' ? 'success' : 'default'}>{e.status}</Badge>
                         <span className="text-text-tertiary">{new Date(e.enrolled_at).toLocaleDateString()}</span>
                       </div>
@@ -458,6 +493,8 @@ export function ResearchDetailPage() {
                     <thead>
                       <tr className="border-b border-border bg-surface">
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient ID</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Basic Info</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Status</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Arm</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Enrolled</th>
@@ -467,8 +504,16 @@ export function ResearchDetailPage() {
                     <tbody>
                       {roster.map((r) => (
                         <tr key={r.patient_hash} className="border-b border-border last:border-0">
-                          <td className="px-4 py-2 font-mono text-text-primary">
-                            {r.initials ? `${r.initials} — ` : ''}{r.patient_hash.slice(0, 12)}...
+                          <td className="px-4 py-2 text-text-primary">
+                            {r.name || r.initials || '—'}
+                          </td>
+                          <td className="px-4 py-2 font-mono text-text-secondary">
+                            {r.patient_hash.slice(0, 16)}...
+                          </td>
+                          <td className="px-4 py-2 text-text-secondary">
+                            {r.age_value != null ? `${r.age_value}y` : '—'}
+                            {r.age_value != null && r.sex ? ' / ' : ''}
+                            {r.sex || ''}
                           </td>
                           <td className="px-4 py-2">
                             <Badge variant={r.status === 'active' ? 'success' : 'default'}>{r.status}</Badge>
@@ -513,14 +558,23 @@ export function ResearchDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {eligibility.screenings.map((s, i) => (
-                    <Card key={`${s.patient_hash}-${i}`} className="p-4">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-mono text-sm text-text-primary">{s.patient_hash.slice(0, 12)}...</span>
-                        <Badge variant={s.status === 'eligible' ? 'success' : s.status === 'ineligible' ? 'error' : 'default'}>
-                          {s.status}
-                        </Badge>
-                      </div>
+                    {eligibility.screenings.map((s, i) => (
+                      <Card key={`${s.patient_hash}-${i}`} className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <p className="text-sm font-medium text-text-primary">{s.name || s.initials || s.patient_hash.slice(0, 12)}</p>
+                            <p className="text-xs text-text-tertiary">
+                              ID: {s.patient_hash.slice(0, 16)}...
+                              {s.age_value != null || s.sex ? ' · ' : ''}
+                              {s.age_value != null ? `${s.age_value}y` : ''}
+                              {s.age_value != null && s.sex ? ' / ' : ''}
+                              {s.sex || ''}
+                            </p>
+                          </div>
+                          <Badge variant={s.status === 'eligible' ? 'success' : s.status === 'ineligible' ? 'error' : 'default'}>
+                            {s.status}
+                          </Badge>
+                        </div>
                       {s.criteria_results && s.criteria_results.length > 0 && (
                         <div className="space-y-1 mt-2">
                           {s.criteria_results.map((c, j) => (
@@ -560,6 +614,8 @@ export function ResearchDetailPage() {
                       <tr className="border-b border-border bg-surface">
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Date</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient ID</th>
+                        <th className="px-4 py-2 text-left font-medium text-text-secondary">Basic Info</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary">Status</th>
                         <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
                       </tr>
@@ -568,7 +624,13 @@ export function ResearchDetailPage() {
                       {assessments.map((a) => (
                         <tr key={a.visit_id} className="border-b border-border last:border-0">
                           <td className="px-4 py-2 text-text-primary">{new Date(a.scheduled_at).toLocaleString()}</td>
-                          <td className="px-4 py-2 font-mono text-text-primary">{a.patient_hash.slice(0, 12)}...</td>
+                          <td className="px-4 py-2 text-text-primary">{a.name || a.initials || '—'}</td>
+                          <td className="px-4 py-2 font-mono text-text-secondary">{a.patient_hash.slice(0, 16)}...</td>
+                          <td className="px-4 py-2 text-text-secondary">
+                            {a.age_value != null ? `${a.age_value}y` : '—'}
+                            {a.age_value != null && a.sex ? ' / ' : ''}
+                            {a.sex || ''}
+                          </td>
                           <td className="px-4 py-2">
                             <Badge variant={a.status === 'completed' ? 'success' : a.status === 'pending' ? 'warning' : 'default'}>
                               {a.status}
@@ -627,21 +689,29 @@ export function ResearchDetailPage() {
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-border">
                       <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border bg-surface">
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient</th>
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary">Category</th>
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary">AE Grade</th>
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary">DLT</th>
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary">Date</th>
-                            <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {observations.map((o) => (
-                            <tr key={o.observation_id} className="border-b border-border last:border-0">
-                              <td className="px-4 py-2 font-mono text-text-primary">{o.patient_hash.slice(0, 12)}...</td>
-                              <td className="px-4 py-2 text-text-secondary">{o.category}</td>
+                          <thead>
+                            <tr className="border-b border-border bg-surface">
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">Patient ID</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">Basic Info</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">Category</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">AE Grade</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">DLT</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary">Date</th>
+                              <th className="px-4 py-2 text-left font-medium text-text-secondary"></th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {observations.map((o) => (
+                              <tr key={o.observation_id} className="border-b border-border last:border-0">
+                                <td className="px-4 py-2 text-text-primary">{o.name || o.initials || '—'}</td>
+                                <td className="px-4 py-2 font-mono text-text-secondary">{o.patient_hash.slice(0, 16)}...</td>
+                                <td className="px-4 py-2 text-text-secondary">
+                                  {o.age_value != null ? `${o.age_value}y` : '—'}
+                                  {o.age_value != null && o.sex ? ' / ' : ''}
+                                  {o.sex || ''}
+                                </td>
+                                <td className="px-4 py-2 text-text-secondary">{o.category}</td>
                               <td className={cn('px-4 py-2 font-medium', aeGradeColor(o.ae_grade))}>
                                 {o.confirmed ? (
                                   o.ae_grade ?? '—'
@@ -726,9 +796,16 @@ export function ResearchDetailPage() {
                       className="flex items-center justify-between rounded-lg border border-border p-3"
                     >
                       <div>
-                        <span className="font-mono text-sm text-text-primary">
-                          {p.initials ? `${p.initials} — ` : ''}{p.patient_hash.slice(0, 12)}...
-                        </span>
+                        <p className="text-sm font-medium text-text-primary">
+                          {p.name || p.initials || '—'}
+                        </p>
+                        <p className="text-xs text-text-tertiary">
+                          ID: {p.patient_hash.slice(0, 16)}...
+                          {p.age_value != null || p.sex ? ' · ' : ''}
+                          {p.age_value != null ? `${p.age_value}y` : ''}
+                          {p.age_value != null && p.sex ? ' / ' : ''}
+                          {p.sex || ''}
+                        </p>
                       </div>
                       <Button
                         size="sm"
