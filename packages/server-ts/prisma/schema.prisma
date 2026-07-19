@@ -101,7 +101,7 @@ model DocSnapshot {
   label     String @default("")
   createdAt String @map("created_at")
 
-  doc Doc @relation(fields: [docId], references: [id])
+  doc Doc @relation(fields: [docId], references: [id], onDelete: Cascade)
   @@index([userId, docId, id(sort: Desc)])
   @@map("doc_snapshots")
 }
@@ -117,7 +117,7 @@ model DocReference {
   sourceNodes  String @default("[]") @map("source_nodes")
   createdAt    String @map("created_at")
 
-  doc Doc @relation(fields: [docId], references: [id])
+  doc Doc @relation(fields: [docId], references: [id], onDelete: Cascade)
   @@index([userId, docId, createdAt])
   @@map("doc_references")
 }
@@ -131,7 +131,7 @@ model DocChatMessage {
   docApplied Int    @default(0) @map("doc_applied")
   createdAt  String @map("created_at")
 
-  doc Doc @relation(fields: [docId], references: [id])
+  doc Doc @relation(fields: [docId], references: [id], onDelete: Cascade)
   @@index([userId, docId, createdAt])
   @@map("doc_chat_messages")
 }

@@ -148,11 +148,8 @@ check "10.9 List references" "$(curl -sf "$BASE/api/v1/docs/$DID/references" -H 
 DOCX_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/docs/$DID/export" -H "$H" 2>/dev/null)
 check "10.10 Export DOCX" "$(echo "$DOCX_STATUS" | python3 -c "import sys; print('ok' if sys.stdin.read().strip()=='200' else 'FAIL: '+sys.stdin.read().strip())")"
 
-DELETE_RESP=$(curl -sS -X DELETE "$BASE/api/v1/docs/$DID" -H "$H" 2>/dev/null)
-DELETE_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/v1/docs/$DID" -H "$H" 2>/dev/null)
-echo "  [debug] delete status=$DELETE_STATUS resp=$DELETE_RESP" >&2
+curl -sf -X DELETE "$BASE/api/v1/docs/$DID" -H "$H" > /dev/null 2>&1
 GET_AFTER_DELETE=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/api/v1/docs/$DID" -H "$H" 2>/dev/null)
-echo "  [debug] get-after-delete status=$GET_AFTER_DELETE" >&2
 check "10.11 Delete document" "$(echo "$GET_AFTER_DELETE" | python3 -c "import sys; print('ok' if sys.stdin.read().strip()=='404' else 'FAIL')")"
 
 # ═══ 11. Calendar ═══
