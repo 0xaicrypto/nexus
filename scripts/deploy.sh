@@ -29,6 +29,10 @@ CORS_ALLOW_ORIGINS=*
 ENVEOF
 
 which pnpm || npm install -g pnpm@10
+# Force fresh Prisma Client install/generation; pnpm's isolated store can
+# cache a stale generated client even after schema changes, causing runtime
+# "Unknown argument" errors.
+rm -rf node_modules/.prisma node_modules/.pnpm/@prisma+client*
 pnpm install --frozen-lockfile
 npx prisma generate
 npx prisma db push --accept-data-loss
