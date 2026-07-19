@@ -61,13 +61,42 @@ if ! curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
   exit 1
 fi
 
-# Build web frontend + serve via nginx
+# Build web frontend
 cd ~/heurion/packages/web
 pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 pnpm build
 chmod -R +rx dist
 chmod +rx /root /root/heurion /root/heurion/packages /root/heurion/packages/web 2>/dev/null || true
 
-# Ensure nginx is running
+# Configure nginx as the public-facing reverse proxy
+NGINX_CONF="/etc/nginx/sites-available/heurion"
+NGINX_ENABLED="/etc/nginx/sites-enabled/heurion"
+
 which nginx || { apt-get update -qq && apt-get install -y -qq nginx; }
-systemctl reload nginx 2>/dev/null || nginx
+
+# Generate a self-signed cert for Cloudflare "Full" SSL mode.
+# (Full accepts any cert; Full strict would need a real CA cert.)
+if [ ! -f /etc/nginx/ssl/heurion.crt ] || [ ! -f /etc/nginx/ssl/heurion.key ]; then
+  mkdir -p /etc/nginx/ssl
+  openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/heurion.key \
+    -out /etc/nginx/ssl/heurion.crt \
+    -subj "/CN=heurion.org" 2>/dev/null
+  chmod 600 /etc/nginx/ssl/heurion.key
+  chmod 644 /etc/nginx/ssl/heurion.crt
+  echo "✓ Generated self-signed SSL cert for heurion.org"
+fi
+
+cp ~/heurion/scripts/nginx-heurion.conf "$NGINX_CONF"
+
+# Enable site if not already enabled
+if [ ! -L "$NGINX_ENABLED" ]; then
+  ln -s "$NGINX_CONF" "$NGINX_ENABLED"
+fi
+
+# Remove default site if it exists to avoid port conflicts
+rm -f /etc/nginx/sites-enabled/default
+
+nginx -t && systemctl reload nginx || systemctl restart nginx
+
+echo "✓ Nginx configured and reloaded"
