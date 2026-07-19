@@ -3,6 +3,7 @@ import { authGuard } from '../../common/auth.guard.js'
 import prisma from '../../common/prisma.js'
 import { deepseekStream, deepseekChat, getApiKey } from '../../common/llm.js'
 import crypto from 'crypto'
+import { Document, Packer, Paragraph, TextRun } from 'docx'
 
 function uid() { return crypto.randomBytes(8).toString('hex') }
 
@@ -61,6 +62,14 @@ export async function documentsRouter(app: FastifyInstance) {
     await (prisma as any).doc.update({ where: { id: docId }, data })
     const doc = await (prisma as any).doc.findFirst({ where: { id: docId } })
     return { id: doc!.id, title: doc!.title, body: doc!.body, created_at: doc!.createdAt, updated_at: doc!.updatedAt }
+  })
+
+  app.delete('/api/v1/docs/:docId', async (request, reply) => {
+    const { docId } = request.params as any
+    const existing = await (prisma as any).doc.findFirst({ where: { id: docId, userId: request.user!.userId } })
+    if (!existing) return reply.status(404).send({ error: 'Document not found' })
+    await (prisma as any).doc.delete({ where: { id: docId } })
+    return { deleted: true }
   })
 
   // ── Snapshots ──
@@ -205,8 +214,81 @@ Instructions:
     }
   })
 
-  app.post('/api/v1/docs/:docId/export', async (_req, reply) => {
-    return reply.status(501).send({ error: 'DOCX export requires Python worker' })
+  app.post('/api/v1/docs/:docId/export', async (request, reply) => {
+    const { docId } = request.params as any
+    const userId = request.user!.userId
+    const doc = await (prisma as any).doc.findFirst({ where: { id: docId, userId } })
+    if (!doc) return reply.status(404).send({ error: 'Document not found' })
+
+    const docx = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            children: [new TextRun({ text: doc.title || 'Untitled', bold: true, size: 32 })],
+          }),
+          new Paragraph({ children: [] }),
+          ...(doc.body || '').split('\n').map((line: string) =>
+            new Paragraph({ children: [new TextRun(line)] })
+          ),
+        ],
+      }],
+    })
+
+    const buffer = await Packer.toBuffer(docx)
+    return reply
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      .header('Content-Disposition', `attachment; filename="${(doc.title || 'document').replace(/[^a-z0-9\u4e00-\u9fa5_-]/gi, '_')}.docx"`)
+      .send(buffer)
+  })
+
+  // ── References ──
+  app.post('/api/v1/docs/:docId/references', async (request, reply) => {
+    const { docId } = request.params as any
+    const userId = request.user!.userId
+    const doc = await (prisma as any).doc.findFirst({ where: { id: docId, userId } })
+    if (!doc) return reply.status(404).send({ error: 'Document not found' })
+
+    const { kind, content, label, source_patient_hash } = request.body as any
+    const id = `ref_${uid()}`
+    const now = new Date().toISOString()
+    await (prisma as any).docReference.create({
+      data: {
+        id,
+        docId,
+        userId,
+        refType: kind || 'note',
+        targetId: source_patient_hash || '',
+        snapshot: content || '',
+        sourceNodes: JSON.stringify({ label: label || '' }),
+        granularity: 'doc',
+        createdAt: now,
+      },
+    })
+    return { reference_id: id, kind: kind || 'note', content: content || '', label: label || '', source_patient_hash: source_patient_hash || '', created_at: now }
+  })
+
+  app.get('/api/v1/docs/:docId/references', async (request, reply) => {
+    const { docId } = request.params as any
+    const userId = request.user!.userId
+    const refs = await (prisma as any).docReference.findMany({
+      where: { docId, userId },
+      orderBy: { createdAt: 'desc' },
+    })
+    return {
+      references: refs.map((r: any) => {
+        let meta: any = {}
+        try { meta = JSON.parse(r.sourceNodes || '{}') } catch { /* ignore */ }
+        return {
+          reference_id: r.id,
+          kind: r.refType,
+          content: r.snapshot,
+          label: meta.label || '',
+          source_patient_hash: r.targetId,
+          created_at: r.createdAt,
+        }
+      }),
+    }
   })
 }
 

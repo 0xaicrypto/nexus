@@ -501,8 +501,22 @@ class ApiClient {
     return this.fetch(`/api/v1/docs/${docId}/phi-scan`, { method: 'POST' });
   }
 
-  async exportDocx(docId: string): Promise<{docx_path: string; size_bytes: number}> {
-    return this.fetch(`/api/v1/docs/${docId}/export`, { method: 'POST' });
+  async exportDocx(docId: string, title?: string): Promise<{docx_path: string; size_bytes: number}> {
+    const r = await fetch(`/api/v1/docs/${docId}/export`, {
+      method: 'POST',
+      headers: this.headers(),
+    });
+    if (!r.ok) throw new ApiError(r.status, await r.text().catch(() => ''), '/export');
+    const blob = await r.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(title || 'document').replace(/[^a-z0-9\u4e00-\u9fa5_-]/gi, '_')}.docx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+    return { docx_path: a.download, size_bytes: blob.size };
   }
 
   async *polishDoc(docId: string, selection: string, instruction?: string): AsyncIterable<{text: string; done?: boolean}> {
@@ -569,6 +583,10 @@ class ApiClient {
 
   async executeSandbox(language: string, code: string): Promise<{ok: boolean; stdout: string; stderr: string; runtime_ms: number; language: string; error: string}> {
     return this.fetch('/api/v1/sandbox/execute', { method: 'POST', body: JSON.stringify({ language, code }) });
+  }
+
+  async getDocReferences(docId: string): Promise<{references: Array<{reference_id: string; kind: string; label: string; content: string; source_patient_hash: string; created_at: string}>}> {
+    return this.fetch(`/api/v1/docs/${docId}/references`);
   }
 
   async addDocReference(docId: string, data: {kind: string; content: string; source_patient_hash?: string; label?: string}): Promise<{reference_id: string}> {

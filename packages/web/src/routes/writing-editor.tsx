@@ -52,6 +52,10 @@ export function WritingEditorPage() {
   const [snapshotsLoading, setSnapshotsLoading] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
 
+  const [showReferences, setShowReferences] = useState(false);
+  const [references, setReferences] = useState<Array<{reference_id: string; kind: string; label: string; content: string; source_patient_hash: string; created_at: string}>>([]);
+  const [referencesLoading, setReferencesLoading] = useState(false);
+
   const [phiScanning, setPhiScanning] = useState(false);
   const [phiFindings, setPhiFindings] = useState<PhiFinding[] | null>(null);
   const [showPhiDialog, setShowPhiDialog] = useState(false);
@@ -126,10 +130,27 @@ export function WritingEditorPage() {
       .finally(() => setSnapshotsLoading(false));
   }, [docId]);
 
+  const loadReferences = useCallback(() => {
+    if (!docId) return;
+    setReferencesLoading(true);
+    api.getDocReferences(docId)
+      .then((r) => setReferences(r.references))
+      .catch(() => {})
+      .finally(() => setReferencesLoading(false));
+  }, [docId]);
+
   const handleToggleHistory = () => {
     const next = !showHistory;
     setShowHistory(next);
+    setShowReferences(false);
     if (next) loadSnapshots();
+  };
+
+  const handleToggleReferences = () => {
+    const next = !showReferences;
+    setShowReferences(next);
+    setShowHistory(false);
+    if (next) loadReferences();
   };
 
   const handleSave = async () => {
@@ -182,7 +203,7 @@ export function WritingEditorPage() {
     setExporting(true);
     setError(null);
     try {
-      const result = await api.exportDocx(docId);
+      const result = await api.exportDocx(docId, doc?.title);
       setExportResult(result);
     } catch (err) {
       setError(err instanceof ApiError ? err.messageText : String(err));
@@ -318,6 +339,7 @@ export function WritingEditorPage() {
       });
       setRefDialogOpen(false);
       setRefForm({ kind: 'guideline', content: '', label: '', source_patient_hash: '' });
+      if (showReferences) loadReferences();
     } catch (err) {
       setError(err instanceof ApiError ? err.messageText : String(err));
     } finally {
@@ -422,6 +444,13 @@ export function WritingEditorPage() {
               onClick={handleToggleHistory}
             >
               <History size={14} className="mr-1" /> History
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggleReferences}
+            >
+              <FilePlus size={14} className="mr-1" /> References
             </Button>
             <Button size="sm" onClick={handleSave} isLoading={saving} disabled={saving}>
               Save
@@ -591,6 +620,39 @@ export function WritingEditorPage() {
                           >
                             <RotateCcw size={14} className="mr-1" /> Restore
                           </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {showReferences && (
+                <Card className="p-4">
+                  <h3 className="mb-3 text-sm font-semibold text-text-secondary">References</h3>
+                  {referencesLoading ? (
+                    <div className="space-y-2">
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                      <Skeleton className="h-12 w-full rounded-lg" />
+                    </div>
+                  ) : references.length === 0 ? (
+                    <p className="text-sm text-text-tertiary">No references yet</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {references.map((ref) => (
+                        <div
+                          key={ref.reference_id}
+                          className="rounded-lg border border-border p-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-medium text-text-secondary uppercase">{ref.kind}</span>
+                            <span className="text-xs text-text-tertiary">{new Date(ref.created_at).toLocaleString()}</span>
+                          </div>
+                          {ref.label && <p className="mt-1 text-sm font-medium text-text-primary">{ref.label}</p>}
+                          <p className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{ref.content}</p>
+                          {ref.source_patient_hash && (
+                            <p className="mt-1 text-xs text-text-tertiary">Patient: {ref.source_patient_hash}</p>
+                          )}
                         </div>
                       ))}
                     </div>

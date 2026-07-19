@@ -126,6 +126,30 @@ print(body or '')
 " 2>/dev/null)
 check "10.3 Doc Chat edits document" "$(echo "$DOC_CHAT_BODY" | python3 -c "import sys; t=sys.stdin.read(); print('ok' if 'CONFIRMED_DOC_CHAT_EDIT' in t else 'FAIL')" 2>/dev/null)"
 
+# ═══ 10b. Document list, snapshots, PHI, references, export, delete ═══
+check "10.4 Document list includes doc" "$(curl -sf "$BASE/api/v1/docs" -H "$H" | python3 -c "import sys,json; docs=json.load(sys.stdin).get('docs',[]); print('ok' if any(d['id']=='$DID' for d in docs) else 'FAIL')" 2>/dev/null)"
+
+SNAP_ID=$(curl -sf "$BASE/api/v1/docs/$DID/snapshots" -H "$H" | python3 -c "import sys,json; snaps=json.load(sys.stdin).get('snapshots',[]); print(snaps[0]['id'] if snaps else '')" 2>/dev/null)
+check "10.5 Snapshot exists after edits" "$([ -n \"$SNAP_ID\" ] && echo ok || echo 'FAIL')"
+
+curl -sf -X POST "$BASE/api/v1/docs/$DID/snapshots/$SNAP_ID/restore" -H "$H" > /dev/null 2>&1
+check "10.6 Restore snapshot" "$(curl -sf "$BASE/api/v1/docs/$DID" -H "$H" | python3 -c "import sys,json; print('ok' if '58yo M, cT2aN2M0 IIIA NSCLC' in json.load(sys.stdin).get('body','') else 'FAIL')" 2>/dev/null)"
+
+# Put PHI-laden body for scan
+curl -sf -X PUT "$BASE/api/v1/docs/$DID" -H "$H" -H "Content-Type: application/json" -d '{"body":"Patient John Smith has SSN 123-45-6789."}' > /dev/null 2>&1
+PHI_COUNT=$(curl -sf -X POST "$BASE/api/v1/docs/$DID/phi-scan" -H "$H" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('findings',[])))" 2>/dev/null)
+check "10.7 PHI scan finds issues" "$([ \"${PHI_COUNT:-0}\" -gt 0 ] && echo ok || echo 'FAIL: 0 findings')"
+
+REF=$(curl -sf -X POST "$BASE/api/v1/docs/$DID/references" -H "$H" -H "Content-Type: application/json" -d '{"kind":"guideline","content":"NCCN NSCLC guideline v4.2024","label":"NCCN","source_patient_hash":""}' | python3 -c "import sys,json; print(json.load(sys.stdin).get('reference_id',''))" 2>/dev/null)
+check "10.8 Add reference" "$([ -n \"$REF\" ] && echo ok || echo 'FAIL')"
+check "10.9 List references" "$(curl -sf "$BASE/api/v1/docs/$DID/references" -H "$H" | python3 -c "import sys,json; print('ok' if any(r.get('reference_id')=='$REF' for r in json.load(sys.stdin).get('references',[])) else 'FAIL')" 2>/dev/null)"
+
+DOCX_STATUS=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "$BASE/api/v1/docs/$DID/export" -H "$H" 2>/dev/null)
+check "10.10 Export DOCX" "$(echo \"$DOCX_STATUS\" | python3 -c "import sys; print('ok' if sys.stdin.read().strip()=='200' else 'FAIL')")"
+
+curl -sf -X DELETE "$BASE/api/v1/docs/$DID" -H "$H" > /dev/null 2>&1
+check "10.11 Delete document" "$(curl -sf -o /dev/null -w '%{http_code}' "$BASE/api/v1/docs/$DID" -H "$H" 2>/dev/null | python3 -c "import sys; print('ok' if sys.stdin.read().strip()=='404' else 'FAIL')")"
+
 # ═══ 11. Calendar ═══
 CAL=$(curl -sf "$BASE/api/v1/calendar/export.ics?token=$TOKEN" 2>/dev/null)
 check "11.1 Calendar iCal format" "$(echo "$CAL" | python3 -c "import sys; t=sys.stdin.read(); print('ok' if 'VCALENDAR' in t else 'FAIL')" 2>/dev/null)"

@@ -167,4 +167,71 @@ describe('Documents', () => {
     expect(res.statusCode).toBe(200)
     expect(res.payload.startsWith('data: ')).toBe(true)
   })
+
+  test('export docx returns binary docx', async () => {
+    const app = await getApp()
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/docs',
+      headers: { ...await authHeader(), 'content-type': 'application/json' },
+      payload: { title: 'Export Test', body: 'Export me' },
+    })
+    const docId = JSON.parse(create.payload).id
+
+    const res = await app.inject({
+      method: 'POST', url: `/api/v1/docs/${docId}/export`,
+      headers: await authHeader(),
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    expect(Buffer.from(res.payload).length).toBeGreaterThan(0)
+  })
+
+  test('add and list references', async () => {
+    const app = await getApp()
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/docs',
+      headers: { ...await authHeader(), 'content-type': 'application/json' },
+      payload: { title: 'Ref Test' },
+    })
+    const docId = JSON.parse(create.payload).id
+
+    const add = await app.inject({
+      method: 'POST', url: `/api/v1/docs/${docId}/references`,
+      headers: { ...await authHeader(), 'content-type': 'application/json' },
+      payload: JSON.stringify({ kind: 'guideline', content: 'NCCN', label: 'NSCLC' }),
+    })
+    expect(add.statusCode).toBe(200)
+    const refId = JSON.parse(add.payload).reference_id
+    expect(refId).toBeTruthy()
+
+    const list = await app.inject({
+      method: 'GET', url: `/api/v1/docs/${docId}/references`,
+      headers: await authHeader(),
+    })
+    expect(list.statusCode).toBe(200)
+    const refs = JSON.parse(list.payload).references
+    expect(refs.some((r: any) => r.reference_id === refId && r.content === 'NCCN')).toBe(true)
+  })
+
+  test('delete document removes it', async () => {
+    const app = await getApp()
+    const create = await app.inject({
+      method: 'POST', url: '/api/v1/docs',
+      headers: { ...await authHeader(), 'content-type': 'application/json' },
+      payload: { title: 'To Delete' },
+    })
+    const docId = JSON.parse(create.payload).id
+
+    const del = await app.inject({
+      method: 'DELETE', url: `/api/v1/docs/${docId}`,
+      headers: await authHeader(),
+    })
+    expect(del.statusCode).toBe(200)
+
+    const get = await app.inject({
+      method: 'GET', url: `/api/v1/docs/${docId}`,
+      headers: await authHeader(),
+    })
+    expect(get.statusCode).toBe(404)
+  })
 })
