@@ -85,6 +85,7 @@ export function WritingEditorPage() {
   const polishRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatFileRef = useRef<HTMLInputElement>(null);
+  const docUploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!docId) return;
@@ -325,6 +326,23 @@ export function WritingEditorPage() {
     setChatUploadingFile(true);
     try { const result = await api.uploadFile(f); setChatAttachedFiles((prev) => [...prev, { name: result.name, fileId: result.file_id }]); } catch { /* ignore */ }
     finally { setChatUploadingFile(false); }
+  };
+
+  const handleDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f || !docId) return;
+    try {
+      await api.uploadFile(f);
+      await api.addDocReference(docId, {
+        kind: f.name.endsWith('.pdf') ? 'pdf' : f.name.endsWith('.docx') || f.name.endsWith('.doc') ? 'docx' : 'file',
+        content: f.name,
+        label: f.name,
+      });
+      setError(null);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.messageText : 'Upload failed');
+    }
+    if (e.target) e.target.value = '';
   };
 
   const handleAddReference = async () => {
@@ -619,7 +637,21 @@ export function WritingEditorPage() {
                             isLoading={restoring === s.snapshot_id}
                           >
                             <RotateCcw size={14} className="mr-1" /> Restore
-                          </Button>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => docUploadRef.current?.click()}
+            >
+              <FileText size={14} className="mr-1" /> Upload
+            </Button>
+            <input
+              ref={docUploadRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt,.md"
+              onChange={handleDocUpload}
+              className="hidden"
+            />
                         </div>
                       ))}
                     </div>
