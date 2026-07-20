@@ -252,9 +252,12 @@ Instructions:
     })
 
     const buffer = await Packer.toBuffer(docx)
+    const safeName = (doc.title || 'document').replace(/[^a-z0-9\u4e00-\u9fa5 _-]/gi, '_').trim() || 'document'
+    const asciiName = safeName.replace(/[^\x20-\x7E]/g, '_')
+    const encoded = encodeURIComponent(safeName)
     return reply
       .header('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-      .header('Content-Disposition', `attachment; filename="${(doc.title || 'document').replace(/[^a-z0-9\u4e00-\u9fa5_-]/gi, '_')}.docx"`)
+      .header('Content-Disposition', `attachment; filename="${asciiName}.docx"; filename*=UTF-8''${encoded}.docx`)
       .send(buffer)
   })
 
