@@ -73,10 +73,30 @@ export async function chatRouter(app: FastifyInstance) {
         }
       }
 
+      // Always include patient roster so AI knows the user's patient list
+      const allPatients = await (prisma as any).patientRecord.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+      })
+      if (allPatients.length > 0) {
+        const roster = allPatients.map((p: any) => {
+          const parts = [`- ${p.initials || 'Unknown'}`]
+          if (p.age) parts.push(`${p.age}y/o`)
+          if (p.sex) parts.push(p.sex)
+          if (p.chiefComplaint) parts.push(`CC: ${p.chiefComplaint}`)
+          return parts.join(', ')
+        }).join('\n')
+        send({ type: 'context_info', text: `## Patient Roster (${allPatients.length} patients)\n${roster}`, kind: 'patient_roster' })
+        fullMessage = `## Patient Roster (${allPatients.length} patients)\n${roster}\n\n` + fullMessage
+      } else {
+        fullMessage = '## Patient Roster\nNo patients registered yet.\n\n' + fullMessage
+      }
+
       // #2: Weighted attention context projection
       const projected = await ctx.orchestrator['projection'].project({
         userId, patientHash, sessionId: sid,
-        persona: 'You are Heurion, a clinical AI assistant for oncology research. Be concise, evidence-based, and reference relevant patient data and accumulated knowledge.',
+        persona: 'You are Heurion, a clinical AI assistant for oncology research. Be concise, evidence-based, and reference relevant patient data and accumulated knowledge. Only reference patients that appear in the Patient Roster above. Do not invent or hallucinate patient names, diagnoses, or clinical details.',
         facts: ctx.facts.all(), episodes: ctx.episodes.all(), skills: ctx.skills.all(),
       })
       send({ type: 'context_info', text: projected.budget.map((b: any) => `${b.layer}: ${b.tokens}t/${b.items}i`).join(' | '), kind: 'projection' })
