@@ -5,7 +5,7 @@ set -e
 cd ~/heurion || { git clone https://github.com/0xaicrypto/heurion.git ~/heurion && cd ~/heurion; }
 # Ensure VPS matches origin/main exactly; any local changes are usually
 # leftover from a previous failed deploy and should not block updates.
-git fetch origin main
+git fetch origin main 2>/dev/null || { sleep 3; git fetch origin main; }
 git reset --hard origin/main
 echo "Deploying: $(git log -1 --oneline)"
 
