@@ -180,10 +180,10 @@ CAL_EVENTS=$(echo "$CAL" | python3 -c "import sys; print(sys.stdin.read().count(
 check "11.2 Calendar has events" "$([ "${CAL_EVENTS:-0}" -gt 0 ] && echo ok || echo 'FAIL: 0 events')"
 
 # ═══ 12. File content (Labs) ═══
-LAB_ID=$(curl -sf "$BASE/api/v1/files/uploads?patient_hash=$HASH" -H "$H" | python3 -c "import sys,json; [print(f['file_id']) for f in json.load(sys.stdin) if 'lab' in f['name'].lower()][:1]" 2>/dev/null | tr -d '\n\r')
+LAB_ID=$(curl -sf "$BASE/api/v1/files/uploads?patient_hash=$HASH" -H "$H" | python3 -c "import sys,json; files=[f for f in json.load(sys.stdin) if 'lab' in f.get('name','').lower()]; print(files[0]['file_id'] if files else '')" 2>/dev/null | tr -d '\n\r')
 # Fallback: if no lab file found, use any uploaded non-DICOM file
 if [ -z "$LAB_ID" ]; then
-  LAB_ID=$(curl -sf "$BASE/api/v1/files/uploads?patient_hash=$HASH" -H "$H" | python3 -c "import sys,json; print(next((f['file_id'] for f in json.load(sys.stdin) if not f['name'].lower().endswith('.dcm')), ''))" 2>/dev/null | tr -d '\n\r')
+  LAB_ID=$(curl -sf "$BASE/api/v1/files/uploads?patient_hash=$HASH" -H "$H" | python3 -c "import sys,json; files=[f for f in json.load(sys.stdin) if not f.get('name','').lower().endswith('.dcm')]; print(files[0]['file_id'] if files else '')" 2>/dev/null | tr -d '\n\r')
 fi
 echo "  LAB_ID=[$LAB_ID]"
 RAW=$(curl -sS -w '\nHTTP:%{http_code}' "$BASE/api/v1/files/$LAB_ID/content" -H "$H" 2>&1)
