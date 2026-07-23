@@ -10,14 +10,22 @@ export default defineConfig({
   expect: { timeout: 10000 },
   retries: 1,
   use: {
-    // Nginx serves web dist + proxies /api/ to staging/prod by Host header.
-    // On VPS CI, use localhost:80 (Nginx) which routes to staging.heurion.org.
+    // E2E runs on VPS via SSH, hitting Nginx directly to skip Cloudflare.
+    // Chromium --host-rules maps staging.heurion.org → localhost (self-signed SSL).
     baseURL: process.env.BASE_URL || 'https://staging.heurion.org',
     headless: true,
     viewport: { width: 1280, height: 800 },
     ignoreHTTPSErrors: true,
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    {
+      name: 'chromium',
+      use: {
+        browserName: 'chromium',
+        launchOptions: {
+          args: ['--host-rules=MAP staging.heurion.org localhost'],
+        },
+      },
+    },
   ],
 })
