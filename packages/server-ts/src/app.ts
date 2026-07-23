@@ -58,14 +58,15 @@ export async function createApp(): Promise<FastifyInstance> {
 
   // ── Serve web frontend for staging/testing (SPA fallback on non-/api routes) ──
   const webDistDir = process.env.WEB_DIST_DIR || './web-dist'
-  if (existsSync(webDistDir)) {
-    await app.register(fastifyStatic, { root: webDistDir, prefix: '/', wildcard: false })
+  const resolvedDistDir = webDistDir.startsWith('/') ? webDistDir : require('path').resolve(webDistDir)
+  if (existsSync(resolvedDistDir)) {
+    await app.register(fastifyStatic, { root: resolvedDistDir, prefix: '/', wildcard: false })
     app.setNotFoundHandler((req: FastifyRequest, reply: FastifyReply) => {
       if (req.url.startsWith('/api/') || req.url.startsWith('/healthz')) {
         reply.status(404).send({ error: 'Not found' })
       } else {
         reply.header('Content-Type', 'text/html')
-        reply.send(readFileSync(`${webDistDir}/index.html`, 'utf-8'))
+        reply.send(readFileSync(`${resolvedDistDir}/index.html`, 'utf-8'))
       }
     })
   }
