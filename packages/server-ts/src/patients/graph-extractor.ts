@@ -51,8 +51,7 @@ export function extractEntities(text: string): ClinicalEntity[] {
   }
 
   // EGFR/mutation
-  const egfrMatch = text.match(/(EGFR|ALK|ROS1|BRAF|KRAS|HER2|MSI|PD-L1)\s*[：:]?\s*(exon\s*\d+)?\s*(\w+)?\s*(mutation|deletion|fusion|阳性|突变|野生型)?/gi)
-  for (const m of text.matchAll(egfrMatch) || []) {
+  for (const m of text.matchAll(/(EGFR|ALK|ROS1|BRAF|KRAS|HER2|MSI|PD-L1)\s*[：:]?\s*(exon\s*\d+)?\s*(\w+)?\s*(mutation|deletion|fusion|阳性|突变|野生型)?/gi)) {
     entities.push({ type: 'finding', content: m[0].trim(), confidence: 0.88 })
   }
 
