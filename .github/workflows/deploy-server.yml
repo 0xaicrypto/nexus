@@ -65,7 +65,6 @@ jobs:
   e2e:
     name: E2E Browser Tests
     needs: [staging]
-    if: false  # TODO: install Playwright on VPS and enable this gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,8 +76,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
             export NVM_DIR=\"\$HOME/.nvm\" && [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
             cd ~/heurion/packages/server-ts
-            [ -f node_modules/.bin/playwright ] || npm install playwright
-            npx playwright install chromium
+            npx playwright install --with-deps chromium
             npx playwright test --config=playwright.config.ts --base-url=http://localhost:8002
           "
 

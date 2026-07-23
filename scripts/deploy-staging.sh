@@ -38,6 +38,11 @@ pm2 save
 sleep 3
 npx tsx scripts/set-admin.ts 2>/dev/null || true
 
+# Pre-install Playwright browser one-time for E2E tests
+npx playwright install chromium 2>/dev/null || true
+
+echo "Staging ready on port 8002"
+
 # Robust health check: retry instead of a single attempt.
 HEALTH_URL="http://localhost:8002/healthz"
 MAX_RETRIES=15
