@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'vitest'
+import { describe, test, expect, beforeEach } from 'vitest'
 import { buildPersona, buildFileContext } from '../src/modules/chat/user-context'
 import { FactsStore, KnowledgeStore } from '../src/evolution/stores'
 import os from 'os'
