@@ -20,17 +20,20 @@ export function classifyQuery(query: string): QueryIntent {
 
   // File references
   if (q.startsWith('#文件') || q.startsWith('#file') ||
-      q.includes('上传的') && q.includes('文件') ||
+      q.includes('上传') && (q.includes('文件') || q.includes('CT') || q.includes('报告')) ||
       q.includes('uploaded') && q.includes('file')) {
     return 'file'
   }
 
   // SQL — patient demographic queries
   const sqlPatterns = [
-    /(.)的(年龄|性别|名字|姓名|主诉|身高|体重|电话|地址)/,
-    /what is.*(age|sex|name|gender)/,
-    /(patient|患者).*(list|列表|有几个|count|how many)/,
-    /(我|my).*(patient|患者).*(list|count|number)/,
+    /(患者|patient).*(年龄|性别|名字|姓名|主诉|多大|叫什么)/,
+    /(年龄|性别|名字|姓名|主诉|多大|叫什么).*(是|为)/,
+    /what is.*(age|sex|name|gender)/i,
+    /(patient|患者).*(list|列表|有几个|count|how many)/i,
+    /(我|my).*(patient|患者).*(list|count|number)/i,
+    /list.*(patient|患者)/i,
+    /(which|what).*(patient|患者)/i,
   ]
   if (sqlPatterns.some(p => p.test(q))) return 'sql'
 
