@@ -1,7 +1,7 @@
 import path from 'path'
 import fs from 'fs'
 import { EventLog } from '../../core/event-log'
-import { FactsStore, EpisodesStore, SkillsStore } from '../../evolution/stores'
+import { FactsStore, EpisodesStore, SkillsStore, KnowledgeStore } from '../../evolution/stores'
 import { ContractEngine } from '../../core/contracts'
 import { ChatOrchestrator } from './chat.orchestrator.js'
 
@@ -9,7 +9,7 @@ const TTL_MS = 30 * 60 * 1000 // 30 minutes idle → evict
 const GC_INTERVAL_MS = 5 * 60 * 1000
 
 interface UserContext {
-  eventLog: EventLog; facts: FactsStore; episodes: EpisodesStore; skills: SkillsStore
+  eventLog: EventLog; facts: FactsStore; episodes: EpisodesStore; skills: SkillsStore; knowledge: KnowledgeStore
   orchestrator: ChatOrchestrator
   lastAccess: number
 }
@@ -40,6 +40,7 @@ export function getUserContext(userId: string): Omit<UserContext, 'lastAccess'> 
   const facts = new FactsStore(baseDir)
   const episodes = new EpisodesStore(baseDir)
   const skills = new SkillsStore(baseDir)
+  const knowledge = new KnowledgeStore(baseDir)
   const contracts = new ContractEngine()
   contracts.addRule({
     name: 'max_response_length',
@@ -49,7 +50,7 @@ export function getUserContext(userId: string): Omit<UserContext, 'lastAccess'> 
       return est > 2000 ? { passed: false, violations: [`Too long (${est} tokens)`], score: 0.5 } : { passed: true, violations: [], score: 1 }
     },
   })
-  const ctx = { eventLog, facts, episodes, skills, orchestrator: new ChatOrchestrator(eventLog, facts, episodes, skills, contracts), lastAccess: Date.now() }
+  const ctx = { eventLog, facts, episodes, skills, knowledge, orchestrator: new ChatOrchestrator(eventLog, facts, episodes, skills, contracts), lastAccess: Date.now() }
   contexts.set(userId, ctx)
   return ctx
 }

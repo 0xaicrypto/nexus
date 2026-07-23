@@ -36,7 +36,11 @@ export interface KnowledgeArticle {
   title: string
   content: string
   sources: string[]
+  version: number
+  status: 'current' | 'stale'
+  staleBecause?: string[]  // which source IDs changed
   createdAt: number
+  updatedAt: number
 }
 
 // ── Facts Store ──────────────────────────────────────────────
@@ -170,13 +174,73 @@ export class KnowledgeStore {
     fs.mkdirSync(dir, { recursive: true })
     this.store = new VersionedStore(dir)
     const current = this.store.current()
-    if (current && Array.isArray(current)) this.working = current
+    if (current && Array.isArray(current)) {
+      this.working = current.map((a: any) => ({
+        ...a,
+        version: a.version || 1,
+        status: a.status || 'current',
+        updatedAt: a.updatedAt || a.createdAt || 0,
+      }))
+    }
   }
 
-  compile(article: Omit<KnowledgeArticle, 'id' | 'createdAt'>): KnowledgeArticle {
-    const a: KnowledgeArticle = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, ...article, createdAt: Date.now() }
-    this.working.push(a)
+  add(article: Omit<KnowledgeArticle, 'id' | 'createdAt' | 'updatedAt' | 'version' | 'status'>): KnowledgeArticle {
+    const now = Date.now()
+    const a: KnowledgeArticle = {
+      id: `${now}-${Math.random().toString(36).slice(2, 8)}`,
+      ...article,
+      version: 1,
+      status: 'current',
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.working.unshift(a)
     return a
+  }
+
+  update(id: string, patch: Partial<Pick<KnowledgeArticle, 'title' | 'content' | 'sources'>>): KnowledgeArticle | null {
+    const idx = this.working.findIndex(a => a.id === id)
+    if (idx === -1) return null
+    const now = Date.now()
+    this.working[idx] = {
+      ...this.working[idx],
+      ...patch,
+      version: this.working[idx].version + 1,
+      status: 'current',
+      staleBecause: undefined,
+      updatedAt: now,
+    }
+    return this.working[idx]
+  }
+
+  markStale(id: string, changedSources: string[]): boolean {
+    const article = this.working.find(a => a.id === id)
+    if (!article) return false
+    article.status = 'stale'
+    article.staleBecause = changedSources
+    article.updatedAt = Date.now()
+    return true
+  }
+
+  markFresh(id: string): boolean {
+    const article = this.working.find(a => a.id === id)
+    if (!article) return false
+    article.status = 'current'
+    article.staleBecause = undefined
+    article.updatedAt = Date.now()
+    return true
+  }
+
+  isStale(id: string): boolean {
+    return this.working.find(a => a.id === id)?.status === 'stale'
+  }
+
+  getStale(): KnowledgeArticle[] {
+    return this.working.filter(a => a.status === 'stale')
+  }
+
+  compile(article: Omit<KnowledgeArticle, 'id' | 'createdAt' | 'updatedAt' | 'version' | 'status'>): KnowledgeArticle {
+    return this.add(article)
   }
 
   all(): KnowledgeArticle[] { return [...this.working] }
