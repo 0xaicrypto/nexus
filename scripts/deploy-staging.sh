@@ -41,7 +41,15 @@ npx tsx scripts/set-admin.ts 2>/dev/null || true
 # Pre-install Playwright browser one-time for E2E tests
 npx playwright install chromium 2>/dev/null || true
 
-echo "Staging ready on port 8002"
+# Build web frontend for staging UI (Nginx serves dist/ for staging.heurion.org)
+cd ~/heurion/packages/web
+pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+pnpm build
+chmod -R +rx dist
+chmod +rx /root /root/heurion /root/heurion/packages /root/heurion/packages/web 2>/dev/null || true
+cd ~/heurion/packages/server-ts
+
+echo "Staging ready on port 8002 (web via Nginx)"
 
 # Robust health check: retry instead of a single attempt.
 HEALTH_URL="http://localhost:8002/healthz"

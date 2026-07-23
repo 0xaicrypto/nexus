@@ -76,8 +76,7 @@ jobs:
           ssh -o StrictHostKeyChecking=no ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
             export NVM_DIR=\"\$HOME/.nvm\" && [ -s \"\$NVM_DIR/nvm.sh\" ] && . \"\$NVM_DIR/nvm.sh\"
             cd ~/heurion/packages/server-ts
-            npx playwright install --with-deps chromium
-            npx playwright test --config=playwright.config.ts --base-url=http://localhost:8002
+            npx playwright test --config=playwright.config.ts
           "
 
   deploy:
