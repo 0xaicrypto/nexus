@@ -26,7 +26,9 @@ export function classifyQuery(query: string): QueryIntent {
   }
 
   // SQL — patient demographic queries
-  if (/(患者|patient)/i.test(q) && /(年龄|性别|名字|姓名|主诉|多大|叫什么|age|sex|name|gender)/i.test(q)) return 'sql'
+  const hasDemographic = /(年龄|性别|名字|姓名|主诉|多大|叫什么|age|sex|name|gender)/i.test(q)
+  const hasPatientRef = /(患者|patient|的年龄|的性别|的名字|的姓名)/i.test(q)
+  if (hasDemographic && hasPatientRef) return 'sql'
   if (/(list|列表|有几个|count|how many|哪些|all)/i.test(q) && /(patient|患者)/i.test(q)) return 'sql'
 
   // Semantic/clinical — these need vector search of Knowledge/Facts
