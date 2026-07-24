@@ -49,8 +49,6 @@ pm2 save
 sleep 3
 npx tsx scripts/set-admin.ts 2>/dev/null || true
 
-# Pre-install Playwright browser one-time for E2E tests
-npx playwright install chromium 2>/dev/null || true
 # Ensure playwright CLI wrapper exists in .bin (pnpm v10 may not create it)
 if [ ! -f node_modules/.bin/playwright ]; then
   mkdir -p node_modules/.bin
@@ -65,6 +63,8 @@ fi
 WRAPPER
   chmod +x node_modules/.bin/playwright
 fi
+# Pre-install Playwright browser using local CLI
+node_modules/.bin/playwright install chromium 2>/dev/null || true
 
 echo "Staging serving web+API on port 8002"
 
